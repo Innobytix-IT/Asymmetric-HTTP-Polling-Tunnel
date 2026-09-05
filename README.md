@@ -19,6 +19,7 @@ Ausführen (PHP-Aufrufe) ist scharf gedeckelt. Die Herleitung dazu steht in
 [`kern/ARCHITEKTUR.md`](kern/ARCHITEKTUR.md).
 
 Idee, Namensgebung und Referenzumsetzung: Manuel Person, InnoBytix-IT.
+Wie es dazu kam: [`GESCHICHTE.md`](GESCHICHTE.md).
 
 ---
 
