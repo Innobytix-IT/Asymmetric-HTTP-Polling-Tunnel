@@ -1,0 +1,101 @@
+# AHPT-Agent -- Beispielkonfiguration
+#
+# Kopieren nach config.toml und anpassen. Alles, was hier steht, wird BEIM
+# START geprueft: Was fehlt oder unplausibel ist, laesst den Agenten gar
+# nicht erst anlaufen. Ein Agent mit halber Konfiguration antwortet auf jede
+# Frage "nichts gefunden" -- und das sieht von aussen aus wie ein leerer
+# Dienst, nicht wie ein Fehler.
+#
+# WARUM TOML UND NICHT YAML
+# `tomllib` liegt seit Python 3.11 in der Standardbibliothek; YAML braeuchte
+# PyYAML, also eine Abhaengigkeit ausgerechnet fuer die Datei, die jeder
+# Nutzer als erstes anfasst. Auf Python 3.8-3.10 dieselbe Struktur als
+# config.json ablegen und mit --konfig config.json starten.
+
+[relay]
+
+# Das Verzeichnis auf dem Webspace, in dem relay.php liegt.
+#
+# MUSS https sein. Ueber http reist das Geheimnis im Klartext mit, und jeder
+# Zwischenknoten liest es. Einzige Ausnahme ist Loopback -- dort verlaesst
+# nichts den Rechner. Das ist keine Testklappe: Ein echter Webspace ist nie
+# Loopback, die Regel kann also nicht versehentlich in den Betrieb geraten.
+basis = "https://example.de/ahpt"
+
+# Die Datei mit dem geteilten Geheimnis, mindestens 16 Zeichen.
+# Erzeugen etwa mit:  python3 -c "import secrets;print(secrets.token_hex(32))"
+#
+# Dasselbe Geheimnis muss auf dem Webspace als relay_token.php liegen, und
+# zwar mit der Schutzzeile davor:
+#
+#     <?php exit; ?>
+#     <hier das Geheimnis>
+#
+# Die Endung .php ist der Schutz, nicht die .htaccess: Der Server FUEHRT die
+# Datei AUS und gibt nichts aus. Eine .htaccess kann beim Hochladen
+# verlorengehen -- am 02.09.2026 zweimal passiert, jeweils mit gruenem Haken
+# im Uploader.
+geheimnis_datei = "~/.ahpt/geheimnis"
+
+# Abstand zwischen zwei Abrufen der Warteschlange, in Sekunden.
+# Das kostet nichts: Der Abruf ist bedingt (If-None-Match) und liefert im
+# Normalfall HTTP 304 mit null Bytes und ohne einen einzigen PHP-Prozess.
+# Im Live-Lauf vom 02.09.2026 waren 264 von 270 Abrufen 304.
+poll_abstand = 1.0
+
+# Spaetestens nach so vielen Sekunden wird die Warteschlange UNBEDINGT
+# geholt, also ohne If-None-Match.
+#
+# Das ist kein Feinschliff, sondern ein Sicherheitsnetz gegen einen
+# gemessenen Fehler: Apaches ETag besteht aus Aenderungszeit in ganzen
+# SEKUNDEN und Groesse. Zwei Warteschlangen mit je einem Eintrag sind gleich
+# lang -- faellt beides in dieselbe Sekunde, sind sie nicht zu
+# unterscheiden, der Agent bekommt 304 und uebersieht die Frage dauerhaft.
+#
+# `FileETag INode MTime Size` in der .htaccess behebt es an der Wurzel.
+# Dieser Wert wirkt auch dann, wenn die .htaccess nie ankommt -- und genau
+# das ist am 02.09.2026 zweimal passiert.
+unbedingt_nach = 30
+
+
+# ---------------------------------------------------------------- Dienste
+#
+# `name` reist ueber die Leitung. `art` waehlt den Handler in handler/.
+# Die Trennung ist keine Umstaendlichkeit: Zwei kiwix-Instanzen sind zwei
+# Dienste mit EINEM Handler -- genau die Aufteilung allgemein/medizin aus
+# der Referenzumsetzung, nur als Daten statt als Quelltext.
+#
+# `aktionen` ist der Schnitt aus dem, was der Handler kann, und dem, was
+# hier freigegeben ist. Nie die Vereinigung. Weglassen heisst: alles, was
+# der Handler kann.
+
+[[dienst]]
+name     = "wiki"
+art      = "kiwix"
+# Nur 127.0.0.1, localhost oder ::1, und nur als blosse Basis ohne Pfad.
+# Ein Handler, der ins LAN greifen darf, ist von aussen bedienbar --
+# Drucker, Router, NAS. Das ist der eine Fehler, der alles kaputtmacht.
+ziel     = "http://127.0.0.1:8081"
+aktionen = ["suche", "artikel"]
+max_treffer = 8
+
+[[dienst]]
+name     = "medizin"
+art      = "kiwix"
+ziel     = "http://127.0.0.1:8082"
+aktionen = ["suche", "artikel"]
+
+[[dienst]]
+name   = "dateien"
+art    = "datei"
+# Der Ordner, aus dem ausgeliefert wird. Wird beim Start aufgeloest und
+# geprueft; / und das Benutzerverzeichnis werden abgelehnt.
+wurzel = "./beispiel-freigabe"
+# "liste" allein gaebe nur Verzeichnisse heraus, "hole" allein liesse nichts
+# finden. Wer nur ausliefern und nichts auflisten will, nimmt nur "hole".
+aktionen = ["liste", "hole"]
+max_bytes = 5242880
+# LEER LASSEN HEISST: ALLES aus diesem Ordner geht hinaus, was die drei
+# Pfadschranken passiert. Das ist erlaubt und manchmal gewollt -- der Agent
+# sagt es beim Start laut. Mit Liste geht nur, was hier steht.
+endungen = ["pdf", "txt", "md", "jpg", "png"]

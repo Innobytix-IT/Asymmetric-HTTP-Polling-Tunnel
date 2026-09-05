@@ -1,0 +1,136 @@
+# AHPT/1 -- Apache-Regeln fuer den Webspace
+#
+# ZWEITE Schranke, nicht die erste. Die erste steckt IN den Dateien: Sie
+# heissen .php und beenden PHP in der ersten Zeile, der Server fuehrt sie
+# aus statt sie auszuliefern.
+#
+# Der Grund ist gemessen, nicht theoretisch: Am 02.09.2026 meldete der
+# Uploader eine neue .htaccess ZWEIMAL mit gruenem Haken, auf dem Server lag
+# weiter die alte. Nachweis: `peers_data.json` 403, `tunnel_state.json` 200
+# -- beide Namen in DERSELBEN FilesMatch-Regel.
+#
+# Ein Schutz, der davon abhaengt, dass eine Konfigurationsdatei ankommt, ist
+# besonders tueckisch: Ein ungeschuetztes Geheimnis funktioniert genauso gut
+# wie ein geschuetztes. Nichts faellt auf.
+#
+# Diese Datei ist deshalb die Rueckversicherung, nicht der Schutz.
+
+
+# --- 1. Die zwei empfindlichen Dateien ---------------------------------
+#
+#   relay_token.php   das Geheimnis, mit dem sich der Agent ausweist. Wer es
+#                     liest, kann jedem Besucher beliebigen Text als echten
+#                     Inhalt unterschieben -- schlimmer als gar keine
+#                     Antwort, weil sie geglaubt wird.
+#
+#   relay_state.php   fuehrt Buch, WER wie viele Fragen offen hat. Der
+#                     Absender steht dort als GESALZENER Hash -- gesalzen,
+#                     weil ein SHA-256 ueber eine IPv4 in Sekunden
+#                     rueckrechenbar ist. Eine Fehlkonfiguration
+#                     veroeffentlichte sonst sofort Besucher-Adressen.
+#
+# Das Muster erfasst absichtlich auch `.lock` und die `.tmp`-Dateien des
+# atomaren Schreibens: Die tragen fuer Sekundenbruchteile denselben Inhalt.
+<IfModule mod_authz_core.c>
+    <FilesMatch "^(relay_token\.(txt|php).*|relay_state\.(json|php).*)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+
+
+# --- 2. mod_speling ausschalten ----------------------------------------
+#
+# DIE wichtigste Zeile dieser Datei.
+#
+# Apache haelt zwei Dateinamen, die sich um EIN Zeichen unterscheiden, fuer
+# einen Tippfehler und leitet per HTTP 301 um. Am 02.09.2026 gemessen:
+#
+#     GET tunnel/a_<marke>.json   ->  301  ->  tunnel/f_<marke>.json
+#
+# Die Abfrage nach der ANTWORT landete bei der FRAGE. `fetch` folgt so einer
+# Umleitung stillschweigend, und der Besucher las "hat geantwortet, nichts
+# gefunden" -- eine Auskunft, die es nie gab.
+#
+# Bei gestueckelten Antworten waere die Lage dieselbe: Fehlt Stueck 3, weil
+# der Agent es gerade ablegt, kaeme statt 404 eine Umleitung auf Stueck 2,
+# und der Browser setzte eine Datei zusammen, in der Stueck 2 zweimal steht.
+# Eine stillschweigend verfaelschte Datei ist die schlimmste Sorte Fehler in
+# diesem Projekt.
+#
+# Nebenbei plaudert mod_speling Dateinamen aus: Die Anfrage nach
+# `tunnel_token.txt` antwortete mit HTTP 300 und der Auskunft, es gebe
+# `tunnel_token.php`.
+#
+# AHPT wehrt sich auch ohne diese Zeile -- die Stueck-Dateinamen tragen vier
+# abgeleitete Zeichen, jede Datei traegt ihre Marke im Inhalt, und der
+# Client setzt `redirect: 'error'`. Vier Schranken. Diese ist die fuenfte,
+# und sie ist die einzige, die verlorengehen kann.
+<IfModule mod_speling.c>
+    CheckSpelling Off
+    CheckCaseOnly Off
+</IfModule>
+
+
+# --- 3. Kein Verzeichnislisting ----------------------------------------
+#
+# Die Marken sind 128 Bit und nicht erratbar -- aber ein Listing macht das
+# Raten unnoetig. Es wuerde ausserdem jede offene Frage und jede wartende
+# Antwort auf einen Blick zeigen.
+Options -Indexes
+
+
+# --- 4. ETags anlassen -------------------------------------------------
+#
+# Nicht wegoptimieren. Der ganze Kostenvorteil von AHPT haengt daran, dass
+# der Agent die Warteschlange BEDINGT abruft und im Normalfall HTTP 304 mit
+# null Bytes bekommt -- ohne einen einzigen PHP-Prozess. Im Live-Lauf vom
+# 02.09.2026 waren 264 von 270 Abrufen 304.
+#
+# Ohne ETags kaeme jedes Mal die ganze Datei. Das ist zwar immer noch
+# statisch und damit billig, aber es ist genau die Zahl, um die es beim
+# ganzen Entwurf geht.
+<IfModule mod_headers.c>
+    <FilesMatch "^(warteschlange|frage_|antwort_).*\.json$">
+        Header set Cache-Control "no-cache, must-revalidate"
+    </FilesMatch>
+</IfModule>
+# INode MUSS hier mit hinein. Das ist die wichtigste Zeile nach
+# CheckSpelling Off.
+#
+# Apaches Vorgabe ist `FileETag MTime Size` -- Aenderungszeit in ganzen
+# SEKUNDEN, plus Groesse. Am 02.09.2026 lokal nachgestellt und gemessen:
+#
+#   Warteschlange mit Marke A:  97 Bytes, ETag "6a9825a5-61"
+#   ... beantwortet, Schlange leer:  34 Bytes
+#   Warteschlange mit Marke B:  97 Bytes, ETag "6a9825a5-61"   <-- gleich!
+#
+# Zwei Warteschlangen mit je EINEM Eintrag sind exakt gleich lang: Marke und
+# Zeitstempel haben feste Breite. Faellt beides in dieselbe Sekunde und hat
+# der Agent den leeren Zwischenstand nicht gesehen, ist die neue Datei vom
+# ETag her nicht von der alten zu unterscheiden.
+#
+# Folge: Der Agent bekommt HTTP 304 und uebersieht Marke B. Und weil die
+# Datei danach nicht mehr angefasst wird, bekommt er bei JEDEM weiteren
+# Abruf wieder 304 -- die Frage bleibt bis zum Verfall unbeantwortet,
+# waehrend der Besucher wartet. Kein Fehler, keine Meldung, nur Stille.
+#
+# `INode` behebt das vollstaendig: Jedes atomare rename() legt eine NEUE
+# Datei an, also eine neue Inode-Nummer, also einen neuen ETag -- unabhaengig
+# von Sekunde und Groesse.
+#
+# Es bleibt trotzdem die dritte Schranke, nicht die erste: Der Agent holt
+# alle 30 Sekunden UNBEDINGT (ohne If-None-Match), und die Warteschlange
+# traegt eine fortlaufende Nummer, an der er eine uebersehene Aenderung
+# erkennt und meldet. Beides wirkt auch dort, wo diese Datei nie ankommt.
+#
+# (Der uebliche Einwand gegen INode gilt hier nicht: Er betrifft Cluster mit
+# mehreren Servern, auf denen dieselbe Datei verschiedene Inodes hat. Ein
+# Webspace ist ein Dateisystem.)
+FileETag INode MTime Size
+
+
+# Auf NGINX gibt es keine .htaccess -- dort traegt die .php-Endung allein,
+# und `CheckSpelling` hat kein Gegenstueck, weil NGINX so etwas gar nicht
+# erst tut. Die Pfade stehen in Konstanten am Kopf von relay.php, damit man
+# beide empfindlichen Dateien auch ausserhalb des Dokumentenstamms ablegen
+# kann.

@@ -1,0 +1,6 @@
+Dieser Ordner gehoert zur Beispielkonfiguration.
+
+Er ist da, damit `relay_agent.py --selbsttest` ohne Vorbereitung laeuft --
+ein Selbsttest, den man erst einrichten muss, wird nicht gefahren.
+
+Im Betrieb zeigt `wurzel` auf einen echten Freigabeordner.
