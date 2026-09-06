@@ -92,6 +92,18 @@ SCHREIB_BLOCK   = 3 * 1024 * 1024
 # handler/datei.py, LESE_BLOCK). Muss dazu passen, sonst weist er ab.
 LESE_BLOCK      = 4 * 1024 * 1024
 
+# Gemessen 05./06.09.2026 gegen bplaced: Unter Last weist das PHP-Kontingent
+# ein einzelnes Stueck gelegentlich ab, ohne dass Absender oder Inhalt falsch
+# waeren -- dieselbe Gleichzeitigkeitsgrenze wie bei IONOS. Ein Stueck
+# deshalb sofort aufzugeben, wirft die ganze Uebertragung wegen eines
+# einzelnen Ausrutschers weg.
+STUECK_WIEDERHOLUNGEN = 5
+
+# Wie oft ein GANZER Vorgang (neue Marke, neue Frage) versucht wird, bevor
+# aufgegeben wird -- fuer den Fall, dass der Agent gar nicht erst antwortet,
+# nicht nur ein einzelnes Stueck ablehnt.
+FRAGE_WIEDERHOLUNGEN = 3
+
 
 class ClientFehler(Exception):
     pass
@@ -153,6 +165,11 @@ class Aufbau:
             raise ClientFehler('[relay] basis fehlt.')
         self.frist = float(r.get('frist', 60))
         self.abstand = float(r.get('abstand', 0.4))
+        # Wie oft ein ganzer Vorgang (neue Marke, neue Frage) versucht wird,
+        # bevor aufgegeben wird. Einstellbar, weil ein Test, der absichtlich
+        # eine Ablehnung ohne Antwort auf die Probe stellt, sonst bei jeder
+        # Wiederholung erneut die volle Frist abwarten muesste.
+        self.wiederholungen = int(r.get('wiederholungen', FRAGE_WIEDERHOLUNGEN))
 
         k = roh.get('krypto') or {}
         self.verfahren = str(k.get('verfahren', 'keine'))
@@ -213,7 +230,34 @@ class Client:
         self.a = aufbau
 
     def frage(self, dienst, aktion, daten):
-        """Ein vollstaendiger Vorgang: fragen, warten, Antwort auspacken."""
+        """Ein vollstaendiger Vorgang, mit Wiederholung bei Ueberlastung.
+
+        Ein einzelner Versuch kann scheitern, ohne dass etwas falsch waere:
+        der Agent hat gerade nicht abgeholt, die Warteschlange antwortete
+        kurz nicht, ein Stueck kam trotz eigener Wiederholung nicht durch.
+        Deshalb wird der GANZE Vorgang -- neue Marke, neue Frage -- mehrfach
+        versucht, bevor aufgegeben wird. Das ist die letzte, grobe Schranke;
+        die feinere liegt schon naeher am Fehler, in `_hochladen()`.
+        """
+        letzter = None
+        n = max(1, self.a.wiederholungen)
+        for versuch in range(1, n + 1):
+            try:
+                return self._frage_einmal(dienst, aktion, daten)
+            except ClientFehler as e:
+                letzter = e
+                if versuch < n:
+                    time.sleep(3.0)
+        if n == 1:
+            raise letzter
+        raise ClientFehler(
+            'Fehlercode 1202. Die Aufgabe konnte nicht aufgrund einer '
+            'Ueberlastung abgeschlossen werden. Bitte versuchen Sie es zu '
+            'einem spaeteren Zeitpunkt erneut.\n'
+            '  (Letzter Grund nach %d Versuchen: %s)' % (n, letzter))
+
+    def _frage_einmal(self, dienst, aktion, daten):
+        """Ein einzelner Versuch: fragen, warten, Antwort auspacken."""
         sitzung = None
         if self.a.verfahren == 'noise_ik':
             import krypto
@@ -300,13 +344,20 @@ class Client:
         stueckgroesse = -(-len(chiffre) // teile)  # Ganzzahl-Aufrundung
         for i in range(teile):
             stueck = chiffre[i * stueckgroesse:(i + 1) * stueckgroesse]
-            code, d = _sende(self.a.basis + '/relay.php?action=frage_stueck',
-                             {'v': VERSION, 'krypto': self.a.verfahren,
-                              'marke': marke, 'teil': i, 'teile': teile,
-                              'nutzlast': stueck}, timeout=30)
-            if code != 200 or not d.get('ok'):
-                raise ClientFehler('Stueck %d/%d abgewiesen (HTTP %s): %s'
-                                   % (i + 1, teile, code, d.get('fehler', '')))
+            for versuch in range(1, STUECK_WIEDERHOLUNGEN + 1):
+                code, d = _sende(self.a.basis + '/relay.php?action=frage_stueck',
+                                 {'v': VERSION, 'krypto': self.a.verfahren,
+                                  'marke': marke, 'teil': i, 'teile': teile,
+                                  'nutzlast': stueck}, timeout=30)
+                if code == 200 and d.get('ok'):
+                    break
+                if versuch < STUECK_WIEDERHOLUNGEN:
+                    time.sleep(min(5.0, 0.5 * (2 ** (versuch - 1))))
+            else:
+                raise ClientFehler(
+                    'Stueck %d/%d abgewiesen nach %d Versuchen (HTTP %s): %s'
+                    % (i + 1, teile, STUECK_WIEDERHOLUNGEN, code,
+                       d.get('fehler', '')))
             if fortschritt:
                 fortschritt(i + 1, teile)
 

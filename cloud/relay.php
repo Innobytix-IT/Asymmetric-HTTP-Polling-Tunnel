@@ -107,6 +107,25 @@
  *
  * Gefunden hat es die Pruefliste, nicht das Auge. `tests/pruefe_relay_php.py`
  * sucht seither gezielt danach.
+ *
+ * DIE AUSLIEFERUNG IST NICHT LIVE, NUR WEIL SIE ANGEKOMMEN IST
+ * --------------------------------------------------------------
+ * Am 05.09.2026 lag die korrigierte Datei nachweislich byteidentisch auf
+ * bplaced (per FTP direkt nachgelesen), und `ausliefern.sh` meldete jede
+ * Nachkontrolle als "ok" -- trotzdem antwortete `relay.php` noch mit dem
+ * ALTEN Verhalten. Weder ein erneuter Upload (neue Datei-Zeit) noch ein
+ * atomarer FTP-Tausch (RNFR/RNTO auf einen frischen Dateinamen, also ein
+ * neues Inode) hat es geloest. bplaced haelt den kompilierten PHP-Code
+ * offenbar unabhaengig von Dateizeit und Inode vor, und ohne Shell-Zugriff
+ * gibt es keinen Weg, das von aussen zu erzwingen.
+ *
+ * Die Lehre: Ausliefern und Nachkontrolle pruefen, DASS die Datei ankam --
+ * nicht, dass PHP sie auch ausfuehrt. Wer eine Verhaltensaenderung
+ * ausliefert (nicht nur eine neue Datei), muss die AENDERUNG SELBST gegen
+ * den Live-Endpunkt nachmessen, nicht nur Selbsttest-Strukturfelder wie
+ * `datei_da` oder `ablage_schreib`. Bleibt die alte Antwort bestehen, hilft
+ * nur Geduld (der naechste Arbeiter-Neustart des Hosters) oder ein Eingriff
+ * im bplaced-Kundenbereich selbst.
  */
 
 declare(strict_types=1);
@@ -594,7 +613,30 @@ $roh_obj = json_decode($rumpf, false);
 // noch antworten, wenn sonst nichts mehr passt.
 if ($aktion !== 'selbsttest') {
     $v = $eingabe['v'] ?? null;
-    if ($v !== AHPT_VERSION) {
+    // Typtolerant vergleichen: Jede bekannte Client-Fassung schickt eine
+    // Ganzzahl, aber JSON unterscheidet nicht zwischen 1 und 1.0, und PHPs
+    // "!==" wertet beides als verschieden -- nachgemessen am 05.09.2026:
+    // ein zahlengleicher, aber anders typisierter Wert wurde abgewiesen,
+    // obwohl die Fassung stimmte. Nur die FASSUNG zaehlt, nicht der
+    // Zahlentyp.
+    if (!is_numeric($v) || (int)$v !== AHPT_VERSION) {
+        // Diagnose VOR der Ablehnung, mit eigenem Deckel: Ein abgewiesenes
+        // "v" kann zwei ganz verschiedene Ursachen haben, die von aussen
+        // gleich aussehen -- eine echte Fassungsabweichung, oder ein
+        // unvollstaendig angekommener Rumpf (json_decode liefert dann
+        // null, $eingabe wird zu [], $v damit still zu null). Ohne diese
+        // Zeile sind beide Faelle nicht zu unterscheiden. TEMPORAER, bis
+        // die Ursache der Stueck-Ausfaelle vom 05.09.2026 geklaert ist.
+        $log = ABLAGE . '/protokollfehler.log';
+        if (!is_file($log) || filesize($log) < 1_000_000) {
+            @file_put_contents($log,
+                date('c') . " aktion=$aktion rumpf_bytes=" . strlen($rumpf)
+                . ' content_length=' . ($_SERVER['CONTENT_LENGTH'] ?? '?')
+                . ' decode_fehler=' . (json_last_error() !== JSON_ERROR_NONE ? '1' : '0')
+                . ' erhalten=' . substr(var_export($v, true), 0, 120)
+                . ' typ=' . gettype($v) . "\n",
+                FILE_APPEND);
+        }
         antwort(['ok' => false, 'fehler' => 'Protokollfassung', 'erwartet' => AHPT_VERSION,
                  'erhalten' => $v], 400);
     }

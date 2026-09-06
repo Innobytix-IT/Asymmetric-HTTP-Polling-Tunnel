@@ -79,6 +79,16 @@ PROLOG = b'AHPT-Privat/1'
 MAX_STUECK      = 49152     # Bytes je Stueck, dekodiert
 MAX_JSON        = 60000     # Bytes je POST-Rumpf, damit MAX_RUMPF (65536) haelt
 MAX_TEILE       = 256
+
+# Gemessen 05./06.09.2026 gegen bplaced: Bei Last auf dem Webspace weist
+# das PHP-Kontingent ein einzelnes Stueck gelegentlich ab, obwohl Absender
+# und Inhalt in Ordnung sind -- dieselbe Gleichzeitigkeitsgrenze wie bei
+# IONOS, nur unregelmaessig statt zuverlaessig. Ein Stueck deshalb sofort
+# aufzugeben, wirft eine ganze Uebertragung wegen eines einzelnen
+# Ausrutschers weg. STUECK_WIEDERHOLUNGEN wiederholt NUR das eine Stueck,
+# nicht die ganze Antwort -- bei 87 Stuecken je 4-MiB-Block waere ein
+# Neuanfang bei jedem Ausrutscher praktisch aussichtslos.
+STUECK_WIEDERHOLUNGEN = 5
 FRAGE_MAX_ALTER = 110       # s -- knapp unter MARKE_TTL (120) in relay.php
 GEDAECHTNIS     = 600       # s -- so lange erinnern wir uns an erledigte Marken
 POLL_VORGABE    = 1.0
@@ -599,18 +609,26 @@ class Agent:
 
         if teile > 1:
             for i, s in enumerate(stuecke):
-                code, daten = netz.sende_json(
-                    self.relay_url + '?action=stueck',
-                    {'v': VERSION, 'krypto': verf, 'marke': marke,
-                     'teil': i, 'teile': teile, 'nutzlast': s},
-                    self.geheimnis, zaehler=ZAEHLER)
-                if code != 200 or not daten.get('ok'):
-                    # Aufgeben, aber KEIN Verzeichnis ablegen. Lieber gar
-                    # keine Antwort als eine, die auf Luecken zeigt.
+                for versuch in range(1, STUECK_WIEDERHOLUNGEN + 1):
+                    code, daten = netz.sende_json(
+                        self.relay_url + '?action=stueck',
+                        {'v': VERSION, 'krypto': verf, 'marke': marke,
+                         'teil': i, 'teile': teile, 'nutzlast': s},
+                        self.geheimnis, zaehler=ZAEHLER)
+                    if code == 200 and daten.get('ok'):
+                        break
+                    zaehle('stueck_wiederholt')
+                    if versuch < STUECK_WIEDERHOLUNGEN:
+                        time.sleep(min(5.0, 0.5 * (2 ** (versuch - 1))))
+                else:
+                    # Alle Versuche fuer DIESES Stueck verbraucht. Aufgeben,
+                    # aber KEIN Verzeichnis ablegen. Lieber gar keine Antwort
+                    # als eine, die auf Luecken zeigt.
                     zaehle('stueck_fehler')
-                    log('  %s  Stueck %d/%d nicht abgelegt: HTTP %s %s'
-                        % (marke[:8], i + 1, teile, code,
-                           daten.get('fehler', '')))
+                    log('  %s  Stueck %d/%d nicht abgelegt nach %d Versuchen: '
+                        'HTTP %s %s'
+                        % (marke[:8], i + 1, teile, STUECK_WIEDERHOLUNGEN,
+                           code, daten.get('fehler', '')))
                     return False
 
         if sitzung is not None:

@@ -4,17 +4,10 @@
 unterwegs, ohne offenen Port, ohne VPS, mit einem gewoehnlichen Webspace
 als Briefkasten. Ende zu Ende verschluesselt.**
 
-Eine Nutzungsart von AHPT (siehe [`../kern/`](../kern/)) fuer **einen
-einzigen Nutzer**.
+Ein Abzweig von AHPT fuer **einen einzigen Nutzer**. Nicht fuer GitHub.
 
-Im generischen Kern weist sich nur der Agent aus, und der Inhalt ist
-oeffentlich lesbar -- das passt fuer ein Lexikon, nicht fuer eigene
-Dateien. Hier dreht sich das Bedrohungsmodell um: **Beide** Seiten
-weisen sich aus (Noise IK), der Inhalt ist geheim, und zusaetzlich zum
-Lesen kommt das Schreiben dazu. Ein Schreibzugang ins Heimnetz ist der
-Fehler, der alles kaputtmacht, wenn er nicht sauber eingegrenzt ist --
-deshalb die vier Schranken in "Was es nicht gibt, und warum" weiter
-unten.
+Warum sich damit das Bedrohungsmodell umdreht und was daraus folgt, steht in
+`../KONZEPT.md`. Hier steht, wie man es benutzt.
 
 ---
 
@@ -235,15 +228,35 @@ Auflisten                    1,1 s   ein voller Umlauf
 180 KiB zurueckholen         2,7 s
 ```
 
-Das ist die ungestueckelte Frage, gut fuer Dokumente und einzelne Fotos.
-Groessere Dateien gehen ueber `lege_block`: Der Agent haengt sie
-blockweise an eine Teildatei, prueft die Pruefsumme des Ganzen und legt
-erst dann ab -- begrenzt nur durch `max_bytes` (0 = unbegrenzt je Datei)
-und `TEIL_MAX_GESAMT` (4 GiB Zwischenspeicher ueber alle gleichzeitigen
-Uebertragungen). Optional laesst sich vor dem endgueltigen Ablegen ein
-Virenscanner einhaengen (`virenscan_befehl` in der Konfiguration) --
-plattform- und produktunabhaengig, AHPT kennt nur die Kommandozeilen-
-Konvention "Exitcode 0 heisst sauber".
+Fuer Dokumente, Belege und einzelne Fotos tragfaehig. Fuer Videos nicht ueber
+`frage_stueck` allein: Die Grenze liegt bei 160 Stuecken, also rund 5,6 MiB
+je Datei.
+
+### Lasttest mit echten Dateien (bplaced, 06.09.2026)
+
+Elf echte Dateien vom Home Server, elf Formate (txt, jpg, jpeg, pdf, webp,
+mp4, mp3, docx, html, md), jede per SHA-256 gegen das Original geprueft --
+keine Abweichung. Darunter die MP3, die tags zuvor live mit
+„Protokollfassung" abgewiesen worden war (siehe Aenderungshinweis zu
+`relay.php`, Abschnitt „Typtolerant vergleichen"): jetzt Byte fuer Byte
+korrekt angekommen.
+
+```
+11,7 MB per lege_block/hole_block   3,5 min   3 Bloecke a 4 MiB, je
+                                              ~87 Stuecke, 60-90 s je Block
+```
+
+**Die 5,6-MiB-Grenze oben gilt nur fuer den reinen `frage_stueck`-Weg.**
+`lege_block`/`hole_block` nehmen Dateien jeder Groesse -- nur eben langsam:
+Jeder 4-MiB-Block wird selbst noch einmal in ~87 Stuecke zerlegt, macht
+60-90 Sekunden je Block. Fuer ein einzelnes Video tragfaehig, fuer einen
+Video-*Stream* nicht -- das war ohnehin nie das Ziel.
+
+Fuer solche Tests steht ein eigener, dauerhaft in der Weissliste
+eingetragener Testzugang bereit: `~/.ahpt/client_claude_test.toml` (eigener
+Schluessel, dritter Eintrag in `agent_privat.toml` unter `clients`, dort
+kommentiert). Er hat keine besonderen Rechte -- nur eine eigene Identitaet,
+damit ein Testlauf nicht mit Manuels eigenen Geraeten verwechselt wird.
 
 ---
 

@@ -165,7 +165,12 @@ def main():
 
         def klient(privat=None, agent_pub=None):
             return ahpt_client.Client(ahpt_client.Aufbau({
-                'relay': {'basis': basis, 'frist': 40, 'abstand': 0.25},
+                # wiederholungen=1: Dieser Test prueft absichtlich Faelle
+                # ohne Antwort (Kapitel "fail-closed"). Mit dem Standardwert
+                # muesste jeder dieser Faelle die volle Frist mehrfach
+                # abwarten, statt einmal schnell und eindeutig zu scheitern.
+                'relay': {'basis': basis, 'frist': 40, 'abstand': 0.25,
+                          'wiederholungen': 1},
                 'krypto': {'verfahren': 'noise_ik',
                            'schluessel': privat or os.path.join(basis_ordner,
                                                                 'client.key'),
