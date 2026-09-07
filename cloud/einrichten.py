@@ -46,6 +46,7 @@ SICHERHEIT
 
 import argparse
 import ipaddress
+import io
 import json
 import os
 import re
@@ -54,10 +55,12 @@ import socket
 import socketserver
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 import urllib.parse
 import urllib.request
+import zipfile
 from http.server import BaseHTTPRequestHandler
 
 HIER = os.path.dirname(os.path.abspath(__file__))
@@ -338,6 +341,93 @@ def schritt_hochladen(daten):
             'weiter': 'schluessel'}
 
 
+# ------------------------------------------- Vermittler von Hand hochladen
+#
+# WARUM ES DIESEN WEG GIBT
+# -------------------------
+# Der FTP-Weg nimmt dem Nutzer alles ab -- wenn er funktioniert. Er setzt
+# aber voraus, dass der Hoster FTP anbietet, dass curl da ist, und dass das
+# Passwort durch dieses Netz gehen darf. Nichts davon ist selbstverstaendlich:
+# Manche Anbieter haben nur SFTP oder eine Weboberflaeche, in manchen Netzen
+# will man kein Passwort im Klartext schicken, und am 07.09.2026 scheiterte
+# der FTP-Schritt hier an einem selbstsignierten Zertifikat.
+#
+# Dann soll niemand feststecken. Die drei Dateien sind klein, und sie
+# irgendwo hochzuladen kann jeder, der schon einmal eine Webseite betrieben
+# hat. Der Assistent packt sie zusammen, erklaert die Schritte und prueft
+# hinterher nach -- was er beim FTP-Weg ohnehin tut.
+
+def vermittler_paket():
+    """Die Dateien, die auf den Webspace gehoeren -- als ZIP.
+
+    Dasselbe, was der FTP-Weg hochlaedt. Das Geheimnis wird dabei erzeugt,
+    falls es noch keins gibt: Es muss auf BEIDEN Seiten dasselbe sein, und
+    der Agent liest es spaeter aus derselben Datei.
+    """
+    quelle = os.path.join(HIER, 'relay.php')
+    if not os.path.isfile(quelle):
+        raise EinrichtenFehler(
+            'relay.php ist neben mir nicht auffindbar. Wurde der Ordner '
+            'unvollstaendig entpackt?')
+
+    geheimnis_datei = os.path.join(KONFIG_ORDNER, 'geheimnis_privat')
+    if not os.path.isfile(geheimnis_datei):
+        os.makedirs(KONFIG_ORDNER, exist_ok=True)
+        with open(geheimnis_datei, 'wb') as f:
+            f.write(secrets.token_hex(32).encode('ascii'))
+        os.chmod(geheimnis_datei, 0o600)
+    with open(geheimnis_datei, 'rb') as f:
+        geheimnis = f.read().decode('ascii').strip()
+
+    dateien = [
+        ('relay.php', open(quelle, 'rb').read()),
+        ('relay_token.php', ('<?php return %s;' % json.dumps(geheimnis)).encode('utf-8')),
+        ('relay_state.php', b'<?php return ["stand" => 0, "warteschlange" => []];'),
+    ]
+    htaccess = os.path.join(HIER, 'htaccess-beispiel')
+    if os.path.isfile(htaccess):
+        # Im Paket heisst sie .htaccess -- unter dem Namen wird sie gebraucht.
+        # Achtung beim Entpacken: Viele Dateimanager blenden Namen mit
+        # fuehrendem Punkt aus. Darauf weist die Seite hin.
+        dateien.append(('.htaccess', open(htaccess, 'rb').read()))
+
+    puffer = io.BytesIO()
+    with zipfile.ZipFile(puffer, 'w', zipfile.ZIP_DEFLATED) as z:
+        for name, inhalt in dateien:
+            z.writestr(name, inhalt)
+    return puffer.getvalue(), [n for n, _ in dateien]
+
+
+def schritt_vermittler_pruefen(daten):
+    """Liegt der Vermittler wirklich dort, wo der Nutzer ihn hingelegt hat?
+
+    Dieselbe Pruefung wie am Ende des FTP-Weges, und aus demselben Grund:
+    Am 02.09.2026 meldete ein FTP-Programm zweimal einen gruenen Haken,
+    waehrend auf dem Server die alte Datei lag. Ein "ich habe hochgeladen"
+    des Nutzers ist genauso wenig wert -- gemessen wird ueber HTTP.
+    """
+    roh = (daten.get('adresse') or _stand.get('webspace') or '').strip()
+    if not roh:
+        raise EinrichtenFehler(
+            'Es fehlt die Adresse des Ordners, in dem relay.php jetzt liegt.')
+    adresse = _adresse_normalisieren(roh)
+
+    selbsttest = _relay_selbsttest(adresse)
+    if selbsttest is None:
+        raise EinrichtenFehler(
+            'Unter %s antwortet kein relay.php. Moegliche Gruende: die '
+            'Dateien liegen in einem anderen Ordner, sie sind noch nicht '
+            'vollstaendig hochgeladen, oder PHP laeuft auf diesem Webspace '
+            'nicht.' % adresse)
+
+    with _schloss:
+        _stand['webspace'] = adresse
+        _stand['relay_vorhanden'] = True
+        stand_schreiben(_stand)
+    return {'ok': True, 'adresse': adresse, 'selbsttest': selbsttest,
+            'weiter': 'schluessel'}
+
+
 # ------------------------------------------------------ FTP-Hilfen (curl)
 
 def _hat_befehl(name):
@@ -440,8 +530,17 @@ def _webspace_erreichbar(basis):
 
 
 def _relay_selbsttest(basis):
+    """relay.php nach seinem eigenen Befinden fragen.
+
+    Der Parameter heisst `action`, nicht `was` -- das stand hier jahrelang
+    falsch, und die Folge war, dass die Nachpruefung NIE gelang: relay.php
+    antwortete mit "Protokollfassung erwartet", der Assistent verstand das
+    als "antwortet nicht" und meldete einen Fehlschlag, obwohl alles lag.
+    Am 08.09.2026 gefunden, als der haendische Weg dieselbe Pruefung
+    benutzte und an einem nachweislich laufenden Vermittler scheiterte.
+    """
     try:
-        r = urllib.request.urlopen(basis + '/relay.php?was=selbsttest',
+        r = urllib.request.urlopen(basis + '/relay.php?action=selbsttest',
                                    timeout=8)
         d = json.loads(r.read())
         return d
@@ -703,6 +802,194 @@ def schritt_geraet_hinzufuegen(daten):
 _zuletzt_gekoppelt = None
 
 
+# --------------------------------------------------------- Firewall-Lage
+#
+# WARUM DAS HIER STEHT
+# ---------------------
+# Am 07.09.2026 ist die Kopplung ZWEIMAL an einer Firewall gescheitert: die
+# Windows-Firewall auf dem Rechner mit dem Assistenten, und ufw auf dem
+# Heimserver, das aus dem LAN nur Port 80 durchliess. Beide Male stand der
+# QR-Code sauber auf dem Bildschirm, das Handy scannte ihn richtig -- und
+# dann passierte nichts, ohne dass irgendwo stand warum.
+#
+# Ein Assistent, der einen Port oeffnet und einen Code zeigt, laesst den
+# Nutzer in genau diese Falle laufen. Deshalb sieht er vorher nach.
+#
+# WAS DIESE PRUEFUNG NICHT KANN
+# ------------------------------
+# Sie kann nicht feststellen, ob wirklich jemand von aussen durchkommt --
+# das wuesste nur ein zweites Geraet. Sie liest die Regeln, soweit sie ohne
+# Rootrechte lesbar sind, und sagt sonst "weiss ich nicht". Ein "weiss ich
+# nicht" ist brauchbar; ein falsches "alles gut" waere schlimmer als keine
+# Pruefung, weil der Nutzer dann woanders sucht.
+
+def _ufw_regeln():
+    """Freigegebene TCP-Ports laut ufw, oder None wenn nicht lesbar."""
+    try:
+        e = subprocess.run(['sudo', '-n', 'ufw', 'status'],
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if e.returncode != 0 or 'Status' not in e.stdout:
+        return None
+    if 'inaktiv' in e.stdout or 'inactive' in e.stdout:
+        return 'aus'
+    return {int(m) for m in re.findall(r'^(\d+)/tcp\s+ALLOW', e.stdout, re.M)}
+
+
+def _windows_firewall_an():
+    """Ist die Windows-Firewall fuer das aktive Profil eingeschaltet?"""
+    try:
+        e = subprocess.run(['netsh', 'advfirewall', 'show', 'currentprofile'],
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if e.returncode != 0:
+        return None
+    return bool(re.search(r'^\s*State\s+ON|^\s*Status\s+EIN', e.stdout, re.M | re.I))
+
+
+def firewall_lage(port):
+    """Wie stehen die Chancen, dass ein anderes Geraet diesen Port erreicht?
+
+    zustand: 'offen'     -- eine Regel gibt ihn ausdruecklich frei
+             'zu'        -- eine Firewall laeuft und kennt ihn nicht
+             'aus'       -- keine Firewall aktiv
+             'unbekannt' -- nicht lesbar (kein Rootrecht, fremdes System)
+    """
+    if sys.platform.startswith('win'):
+        an = _windows_firewall_an()
+        if an is None:
+            return {'zustand': 'unbekannt', 'werkzeug': 'Windows-Firewall'}
+        if not an:
+            return {'zustand': 'aus', 'werkzeug': 'Windows-Firewall'}
+        # Ob eine Regel fuer genau diesen Port existiert, ist ueber netsh
+        # nur mit erheblichem Aufwand herauszufinden -- und die Antwort
+        # waere trotzdem nicht sicher, weil Regeln sich ueberlagern.
+        return {
+            'zustand': 'unbekannt',
+            'werkzeug': 'Windows-Firewall',
+            'hinweis': 'Die Windows-Firewall ist eingeschaltet. Beim ersten '
+                       'Start fragt sie meist nach, ob Python ins Netz darf '
+                       '-- wurde das abgelehnt, kommt kein anderes Geraet '
+                       'hier an.',
+        }
+
+    regeln = _ufw_regeln()
+    if regeln is None:
+        return {'zustand': 'unbekannt', 'werkzeug': 'ufw'}
+    if regeln == 'aus':
+        return {'zustand': 'aus', 'werkzeug': 'ufw'}
+    if port in regeln:
+        return {'zustand': 'offen', 'werkzeug': 'ufw', 'offene': sorted(regeln)}
+    return {
+        'zustand': 'zu',
+        'werkzeug': 'ufw',
+        'offene': sorted(regeln),
+        'befehl': 'sudo ufw allow from 192.168.0.0/16 to any port %d proto tcp'
+                  % port,
+    }
+
+
+def frage_wo_bedienen():
+    """Hier am Geraet bedienen, oder von einem anderen im Heimnetz?
+
+    Die Frage steht VOR der Portwahl, weil sie sie erübrigen kann: Wer den
+    Assistenten ohnehin auf diesem Rechner oeffnet, braucht keinen Port nach
+    aussen -- und soll auch keinen bekommen. Erst wer von einem anderen
+    Geraet kommen will, hat ueberhaupt ein Firewall-Problem.
+
+    Rueckgabe: 'hier' oder 'netz', oder None wenn nicht gefragt werden kann
+    (kein Terminal, etwa beim Start ueber nohup).
+    """
+    if not sys.stdin.isatty():
+        return None
+    print()
+    print('Wo willst du den Assistenten bedienen?')
+    print()
+    print('  1) Hier auf diesem Geraet')
+    print('     Nichts muss durch eine Firewall, nichts geht durchs Netz.')
+    print('  2) Von einem anderen Geraet im Heimnetz')
+    print('     Zum Beispiel vom Laptop aus, waehrend der Server im Keller')
+    print('     steht. Braucht einen Port, der durch die Firewall kommt.')
+    print()
+    while True:
+        try:
+            w = input('Deine Wahl [1]: ').strip() or '1'
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if w in ('1', '2'):
+            return 'hier' if w == '1' else 'netz'
+        print('Bitte 1 oder 2.')
+
+
+def _browser_oeffnen(url):
+    """Den Browser aufmachen -- aber nur einen grafischen.
+
+    `webbrowser.open` nimmt auf einem Linux-Server ohne Oberflaeche das,
+    was es findet, und das ist oft w3m oder lynx. Der uebernimmt dann das
+    Terminal, in dem der Assistent gerade seine Adresse ausgegeben hat --
+    und der Nutzer sitzt in einem Textbrowser fest, den er nicht wollte.
+    Am 08.09.2026 genau so passiert.
+
+    Ohne DISPLAY oder WAYLAND_DISPLAY gibt es hier also nichts zu oeffnen;
+    die Adresse steht ja auf der Konsole.
+    """
+    if sys.platform.startswith('linux') and not (
+            os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+        return False
+    try:
+        import webbrowser
+        return webbrowser.open(url)
+    except Exception:
+        return False
+
+
+def _port_frei(port):
+    """Laesst sich dieser Port ueberhaupt binden?"""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(('0.0.0.0', port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def waehle_port(wunsch):
+    """Einen Port nehmen, der auch durch die Firewall kommt.
+
+    Der Nutzer soll nicht als erstes eine Firewall-Regel schreiben muessen,
+    um einen Einrichtungs-Assistenten zu erreichen. Ist der Wunschport durch
+    eine Regel gedeckt oder laeuft gar keine Firewall, bleibt es bei ihm.
+    Ist er nachweislich zu, waehlt der Assistent einen der Ports, die
+    ohnehin freigegeben sind -- und sagt in der Startausgabe, warum.
+
+    Rueckgabe: (port, begruendung oder None)
+    """
+    lage = firewall_lage(wunsch)
+    if lage['zustand'] in ('offen', 'aus', 'unbekannt'):
+        return wunsch, None
+
+    # 'zu': unter den freigegebenen einen suchen, der frei ist.
+    for p in lage.get('offene', []):
+        # Ports unter 1024 braeuchten Rootrechte, und 80/443 gehoeren
+        # ueblicherweise einem Webserver -- da draengt sich niemand dazwischen.
+        if p < 1024 or not _port_frei(p):
+            continue
+        return p, ('Port %d ist laut %s nicht freigegeben, %d dagegen schon '
+                   '-- der Assistent nimmt deshalb %d.'
+                   % (wunsch, lage['werkzeug'], p, p))
+    return wunsch, ('Port %d ist laut %s nicht freigegeben, und unter den '
+                    'freigegebenen war keiner frei. Von einem anderen Geraet '
+                    'aus wird der Assistent so nicht erreichbar sein. '
+                    'Abhilfe: %s'
+                    % (wunsch, lage['werkzeug'], lage.get('befehl', '')))
+
+
 def _aus_agent_konfig():
     """Adresse und oeffentlichen Schluessel aus der LAUFENDEN Konfiguration.
 
@@ -928,7 +1215,13 @@ class Auslieferer(BaseHTTPRequestHandler):
         # /kopplung.svg soll direkt antworten: Das Handy holt sich diese
         # Adressen beim Koppeln, und es folgt keiner Umleitung, um sich
         # einen Cookie abzuholen, den es nachher nicht braucht.
-        if 't' in q and not pfad.startswith('/api/') and pfad != '/kopplung.svg':
+        # Der Cookie-Umweg ist fuer die SEITE gedacht. Alles, was ein
+        # Programm direkt abruft -- die App beim Koppeln, ein Download --
+        # soll unmittelbar antworten statt eine Umleitung zu schicken, der
+        # es folgen muesste, um sich einen Cookie zu holen.
+        _direkt = pfad.startswith('/api/') or pfad in ('/kopplung.svg',
+                                                       '/vermittler.zip')
+        if 't' in q and not _direkt:
             t = q['t'][0]
             if secrets.compare_digest(t, _token):
                 cookie = 'at=%s; Path=/; HttpOnly; SameSite=Strict' % _token
@@ -965,6 +1258,33 @@ class Auslieferer(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._antwort(500, 'text/plain; charset=utf-8',
                                      'QR-Code fehlgeschlagen: %s' % e)
+        if pfad == '/vermittler.zip':
+            try:
+                inhalt, _ = vermittler_paket()
+            except EinrichtenFehler as e:
+                return self._antwort(400, 'text/plain; charset=utf-8', str(e))
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Length', str(len(inhalt)))
+            self.send_header('Content-Disposition',
+                             'attachment; filename="ahpt-vermittler.zip"')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.end_headers()
+            self.wfile.write(inhalt)
+            return
+        if pfad == '/api/vermittler_dateien':
+            try:
+                _, namen = vermittler_paket()
+            except EinrichtenFehler as e:
+                return self._antwort(400, 'application/json; charset=utf-8',
+                                     json.dumps({'fehler': str(e)}))
+            return self._antwort(200, 'application/json; charset=utf-8',
+                                 json.dumps({'dateien': namen}))
+        if pfad == '/api/firewall':
+            lage = firewall_lage(_port)
+            lage['port'] = _port
+            return self._antwort(200, 'application/json; charset=utf-8',
+                                 json.dumps(lage))
         if pfad == '/api/gekoppelt':
             # Die Seite fragt das im Takt ab, waehrend der Code auf dem
             # Bildschirm steht. Sobald sich ein Geraet gemeldet hat, steht
@@ -1005,6 +1325,7 @@ class Auslieferer(BaseHTTPRequestHandler):
             '/api/agent':      schritt_agent,
             '/api/geraet_hinzufuegen': schritt_geraet_hinzufuegen,
             '/api/koppeln':    schritt_koppeln,
+            '/api/vermittler_pruefen': schritt_vermittler_pruefen,
         }.get(pfad)
         if aktion is None:
             return self._antwort(404, 'text/plain; charset=utf-8',
@@ -1267,12 +1588,12 @@ async function pruefeWebspace() {
       ort.innerHTML = meldung(
         'Erreichbar &mdash; und es liegt bereits eine <code>relay.php</code> dort. '
         + 'Wir k&ouml;nnen den n&auml;chsten Schritt &uuml;berspringen.', 'gut');
-      setTimeout(() => zeigeFtp(), 800);
+      setTimeout(() => zeigeSchluessel(), 800);
     } else {
       ort.innerHTML = meldung(
-        'Erreichbar. <code>relay.php</code> ist noch nicht da &mdash; das '
-        + 'macht der Assistent gleich f&uuml;r dich.', 'gut');
-      setTimeout(() => zeigeFtp(), 800);
+        'Erreichbar. <code>relay.php</code> ist noch nicht da &mdash; im '
+        + 'n&auml;chsten Schritt kommt sie hin.', 'gut');
+      setTimeout(() => zeigeWieHochladen(), 800);
     }
   } catch (e) {
     ort.innerHTML = meldung(e.message, 'fehler');
@@ -1280,6 +1601,126 @@ async function pruefeWebspace() {
 }
 
 /* ------------------------------------------------------- Schritt 4 */
+/* ------------------------------------------- Schritt 4a: Wie hochladen? */
+function zeigeWieHochladen() {
+  jetzt = 3; leiste();
+  zeig(huelle(
+    '<h2>Wie soll der Vermittler auf den Webspace?</h2>'
+    + '<p>Auf deinem Webspace muss <code>relay.php</code> liegen. Das ist der '
+    + 'Briefkasten zwischen deinem Heimserver und dir, wenn du unterwegs '
+    + 'bist &ndash; vier kleine Dateien, sonst nichts.</p>'
+
+    + '<div class="meldung" style="margin:14px 0">'
+    + '<b>Der Assistent macht es</b><br>'
+    + 'Er braucht dazu die FTP-Zugangsdaten deines Hosters. Danach ruft er '
+    + 'die Adresse ab und pr&uuml;ft, ob wirklich angekommen ist, was er '
+    + 'geschickt hat.'
+    + '</div>'
+    + '<div class="meldung" style="margin:14px 0">'
+    + '<b>Du machst es selbst</b><br>'
+    + 'Der Assistent packt die Dateien zusammen, und du l&auml;dst sie mit '
+    + 'dem Werkzeug hoch, das du ohnehin benutzt &ndash; einem '
+    + 'FTP-Programm, dem Datei-Manager deines Hosters, was auch immer. '
+    + 'Gepr&uuml;ft wird danach genauso. Dieser Weg ist der richtige, wenn '
+    + 'dein Hoster kein FTP anbietet, wenn du dein Passwort nicht durch '
+    + 'dieses Netz schicken willst, oder wenn der FTP-Weg klemmt.'
+    + '</div>',
+    '<button onclick="zeigeWebspace()">Zur&uuml;ck</button>',
+    '<button onclick="zeigeHaendisch()">Ich mache es selbst</button> '
+    + '<button class="haupt" onclick="zeigeFtp()">Der Assistent macht es</button>'
+  ));
+}
+
+/* ------------------------------------ Schritt 4b: von Hand hochladen */
+function zeigeHaendisch() {
+  jetzt = 3; leiste();
+  const ordner = (stand.webspace || '').replace(/\/+$/, '');
+  zeig(huelle(
+    '<h2>Vermittler selbst hochladen</h2>'
+    + '<p>Vier Schritte. Am Ende ruft der Assistent deinen Webspace selbst '
+    + 'auf und sieht nach, ob der Vermittler antwortet &ndash; du musst dich '
+    + 'nicht darauf verlassen, dass das Hochladen geklappt hat.</p>'
+
+    + '<p><b>1. Paket herunterladen</b><br>'
+    + 'Es enth&auml;lt <code>relay.php</code>, <code>relay_token.php</code>, '
+    + '<code>relay_state.php</code> und <code>.htaccess</code>.</p>'
+    + '<p><a class="knopf haupt" href="/vermittler.zip" '
+    + 'download="ahpt-vermittler.zip">Hier herunterladen</a></p>'
+
+    + '<p style="margin-top:18px"><b>2. Entpacken</b><br>'
+    + 'Achtung bei <code>.htaccess</code>: Namen mit f&uuml;hrendem Punkt '
+    + 'blenden viele Dateimanager aus. Wenn du sie nicht siehst, schalte '
+    + '&bdquo;versteckte Dateien anzeigen&ldquo; ein &ndash; ohne sie liegen '
+    + 'deine Fragen und Antworten offen im Verzeichnis.</p>'
+
+    + '<p><b>3. Alle vier Dateien in EINEN Ordner auf den Webspace legen</b><br>'
+    + 'Der Ordner muss &uuml;ber das Web erreichbar sein, welcher es ist, '
+    + 'spielt keine Rolle. Die Dateien geh&ouml;ren nebeneinander, nicht in '
+    + 'Unterordner. Womit du sie hochl&auml;dst, ist egal.</p>'
+
+    + '<p><b>4. Die Adresse dieses Ordners hier eintragen</b></p>'
+    + '<label>Adresse des Ordners, in dem <code>relay.php</code> jetzt liegt</label>'
+    + '<input type="text" id="fHaendischAdresse" '
+    + 'placeholder="dein-webspace.example.com/ahpt" value="'
+    + ordner.replace(/"/g, '&quot;') + '">'
+    + '<div id="haendischErgebnis"></div>'
+
+    + warum('Was steht im Paket, und was ist daran heikel?',
+        '<code>relay.php</code> ist der Vermittler selbst. '
+      + '<code>relay_token.php</code> enth&auml;lt das GEHEIMNIS, mit dem '
+      + 'dein Agent dort Antworten ablegen darf &ndash; es wurde gerade '
+      + 'erzeugt und liegt auch bei dir unter '
+      + '<code>~/.ahpt/geheimnis_privat</code>. Wer es hat, kann gef&auml;lschte '
+      + 'Antworten hinterlegen; mitlesen kann er nichts, das verhindert die '
+      + 'Verschl&uuml;sselung. L&ouml;sch das entpackte Paket, wenn du fertig '
+      + 'bist. <code>relay_state.php</code> ist nur ein leerer Anfangszustand, '
+      + '<code>.htaccess</code> sperrt das Verzeichnis gegen Neugierige.'),
+
+    '<button onclick="zeigeWieHochladen()">Zur&uuml;ck</button>',
+    '<button class="haupt" id="knopfHaendisch" onclick="tuHaendischPruefen()">'
+    + 'Pr&uuml;fen und weiter</button>'
+  ));
+}
+
+async function tuHaendischPruefen() {
+  const ort = $('#haendischErgebnis');
+  const adresse = $('#fHaendischAdresse').value.trim();
+  if (!adresse) {
+    ort.innerHTML = meldung('Bitte die Adresse des Ordners eintragen.', 'fehler');
+    return;
+  }
+  $('#knopfHaendisch').disabled = true;
+  ort.innerHTML = meldung('rufe die Adresse ab &hellip;', 'warn');
+  try {
+    const d = await jsonAn('/api/vermittler_pruefen', { adresse: adresse });
+    stand.webspace = d.adresse;
+    stand.relay_vorhanden = true;
+    // Der Selbsttest sagt mehr als "da". Diese drei Werte sind die, an
+    // denen es sonst haengt: eine vergessene Datei, ein leer gebliebenes
+    // relay_token.php, ein Ablageordner ohne Schreibrecht.
+    const st = d.selbsttest || {};
+    const zeile = (gut, text) =>
+      '<br>' + (gut ? '&#10003; ' : '&#10007; ') + text;
+    ort.innerHTML = meldung(
+      'Gefunden und geantwortet. Der Vermittler liegt unter <code>'
+      + d.adresse.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))
+      + '</code>.'
+      + zeile(st.datei_da, 'relay_token.php liegt daneben')
+      + zeile(st.geheim_zeichen === 64,
+              st.geheim_zeichen === 64
+                ? 'das Geheimnis darin hat die richtige L&auml;nge'
+                : 'das Geheimnis darin hat ' + (st.geheim_zeichen || 0)
+                  + ' Zeichen statt 64')
+      + zeile(st.ablage_schreib, 'der Vermittler darf in sein Verzeichnis schreiben'),
+      (st.datei_da && st.geheim_zeichen === 64 && st.ablage_schreib)
+        ? 'gut' : 'warn');
+    setTimeout(zeigeSchluessel, 900);
+  } catch (e) {
+    ort.innerHTML = meldung(String(e.message), 'fehler');
+    $('#knopfHaendisch').disabled = false;
+  }
+}
+
 function zeigeFtp() {
   jetzt = 3; leiste();
   // Host aus der Webspace-Adresse ableiten
@@ -1629,6 +2070,7 @@ function zeigeGeraetHinzufuegen() {
     + 'onerror="qrFehlt()"></div>'
     + '<div id="qrWarten">' + meldung('Warte auf das Ger&auml;t &hellip;', 'warn')
     + '</div>'
+    + '<div id="qrFirewall"></div>'
     + warum('Was steht in dem Code?',
         'Nur &Ouml;ffentliches: die Adresse des Vermittlers, der '
       + '&ouml;ffentliche Schl&uuml;ssel des Agenten, die Adressen dieses '
@@ -1656,6 +2098,32 @@ function zeigeGeraetHinzufuegen() {
     + 'Hinzuf&uuml;gen</button>'
   ));
   wartAufGeraet();
+  zeigeFirewallLage();
+}
+
+/* Was die Firewall zu diesem Port sagt.
+ *
+ * Zweimal am 07.09.2026 stand der Code sauber auf dem Bildschirm, das Handy
+ * las ihn richtig -- und nichts passierte, weil eine Firewall dazwischen
+ * lag. Das darf der Nutzer nicht erraten muessen. */
+async function zeigeFirewallLage() {
+  const ort = $('#qrFirewall');
+  if (!ort) return;
+  let d;
+  try { d = await jsonAn('/api/firewall'); } catch (e) { return; }
+  if (d.zustand === 'offen' || d.zustand === 'aus') return;   // nichts zu sagen
+
+  if (d.zustand === 'zu') {
+    ort.innerHTML = meldung(
+      '<b>Die Firewall sperrt Port ' + d.port + '.</b> Ein anderes Ger&auml;t '
+      + 'erreicht diesen Assistenten so nicht &ndash; der Code n&uuml;tzt dann '
+      + 'nichts. Entweder den Assistenten auf einem freigegebenen Port starten '
+      + '(<code>--port</code>), oder die Regel setzen:<br>'
+      + '<code>' + (d.befehl || '').replace(/[<>&]/g, c => (
+          {'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</code>', 'fehler');
+  } else if (d.hinweis) {
+    ort.innerHTML = meldung(d.hinweis, 'warn');
+  }
 }
 
 function qrFehlt() {
@@ -1675,9 +2143,23 @@ function qrFehlt() {
 let geraetSeit = 0;
 function wartAufGeraet() {
   geraetSeit = Date.now() / 1000;
+  let gesagt = false;
   const takt = setInterval(async () => {
     const ort = document.getElementById('qrWarten');
     if (!ort) { clearInterval(takt); return; }
+    // Nach einer Dreiviertelminute ohne Rueckmeldung: sagen, wo man
+    // ueblicherweise sucht. Wer bis dahin gescannt hat und nichts sieht,
+    // faengt sonst an, den QR-Code zu verdaechtigen -- und der ist es
+    // fast nie.
+    if (!gesagt && Date.now() / 1000 - geraetSeit > 45) {
+      gesagt = true;
+      ort.insertAdjacentHTML('beforeend', meldung(
+        'Das dauert l&auml;nger als &uuml;blich. Wenn du schon gescannt hast: '
+        + 'Der h&auml;ufigste Grund ist, dass Handy und Rechner nicht im selben '
+        + 'Netz sind &ndash; oder eine Firewall dazwischen liegt. Der Weg '
+        + '&uuml;ber das Eintragen unten funktioniert unabh&auml;ngig davon.',
+        'warn'));
+    }
     try {
       const d = await jsonAn('/api/gekoppelt');
       const z = d.zuletzt;
@@ -1745,12 +2227,44 @@ async function tuGeraetHinzufuegen() {
 def main():
     global _token, _stand, _port
     ap = argparse.ArgumentParser()
-    ap.add_argument('--port', type=int, default=8771)
+    ap.add_argument('--port', type=int, default=None,
+                    help='Vorgabe 8771. Ohne Angabe weicht der Assistent aus, '
+                         'wenn eine Firewall diesen Port nachweislich sperrt.')
     ap.add_argument('--nur-localhost', action='store_true',
                     help='Nur 127.0.0.1, nicht ans LAN.')
     a = ap.parse_args()
 
     _token = secrets.token_hex(16)
+
+    # Erst fragen, dann Port waehlen -- die Antwort kann die Portwahl
+    # erübrigen. Ausdrueckliche Angaben (--port, --nur-localhost) gehen vor:
+    # wer sie setzt, weiss was er will und soll nicht gefragt werden.
+    _firewall_hinweis = None
+    _nur_hier_grund = None
+    if a.port is None and not a.nur_localhost:
+        wahl = frage_wo_bedienen()
+        if wahl == 'hier':
+            a.nur_localhost = True
+        elif wahl == 'netz':
+            a.port, _firewall_hinweis = waehle_port(8771)
+            # Blieb es beim Wunschport, obwohl der gesperrt ist, hat
+            # waehle_port keinen brauchbaren gefunden -- dann ist dieses
+            # Geraet der einzige Ort, an dem der Assistent zu bedienen ist.
+            lage = firewall_lage(a.port)
+            if lage['zustand'] == 'zu':
+                _nur_hier_grund = (
+                    'Es liess sich kein Port finden, der durch die Firewall '
+                    'kommt. Der Assistent laeuft deshalb nur auf DIESEM '
+                    'Geraet -- von einem anderen aus waere er nicht '
+                    'erreichbar. Wer das aendern will: %s'
+                    % lage.get('befehl', 'eine Firewall-Regel setzen'))
+                a.nur_localhost = True
+        else:
+            # Keine Frage moeglich (kein Terminal): wie bisher automatisch.
+            a.port, _firewall_hinweis = waehle_port(8771)
+
+    if a.port is None:
+        a.port = 8771
     _port = a.port
     _stand = stand_lesen()
 
@@ -1773,11 +2287,26 @@ def main():
     zeile()
     zeile('AHPT Cloud -- Einrichtungs-Assistent')
     zeile('=' * 50)
-    zeile('Oeffne diese Adresse im Browser deines Laptops:')
+    zeile('Oeffne diese Adresse im Browser dieses Rechners:'
+          if a.nur_localhost else
+          'Oeffne diese Adresse im Browser deines Laptops:')
     zeile()
-    for adr in eigene_adressen():
+    # Bei --nur-localhost lauscht der Server ausschliesslich auf 127.0.0.1.
+    # Die LAN-Adressen trotzdem zu nennen, waere eine Einladung, es von
+    # einem anderen Geraet zu versuchen -- und dort kommt nichts an.
+    for adr in (['127.0.0.1'] if a.nur_localhost else eigene_adressen()):
         zeile('    http://%s:%d/?t=%s' % (adr, a.port, _token))
     zeile()
+    if _nur_hier_grund:
+        zeile('NUR AUF DIESEM GERAET:')
+        for stueck in textwrap.wrap(_nur_hier_grund, 66):
+            zeile(stueck)
+        zeile()
+    if _firewall_hinweis and not _nur_hier_grund:
+        zeile('ZUR FIREWALL:')
+        for stueck in textwrap.wrap(_firewall_hinweis, 66):
+            zeile(stueck)
+        zeile()
     if not a.nur_localhost:
         # WICHTIG, nicht nur Zierrat: Wer diese Adresse ueber das WLAN
         # oeffnet statt ueber 127.0.0.1, schickt beim FTP-Schritt sein
@@ -1795,6 +2324,15 @@ def main():
     zeile('Der Assistent laeuft nur, solange dieses Fenster offen ist.')
     zeile('Zum Beenden: Strg-C')
     zeile()
+
+    # Wer hier am Geraet bedient, soll nicht die Adresse abtippen muessen.
+    # Auf einem Server ohne Oberflaeche tut sich nichts -- dann steht die
+    # Adresse eben auf der Konsole, und das ist in Ordnung.
+    if a.nur_localhost and _browser_oeffnen(
+            'http://127.0.0.1:%d/?t=%s' % (a.port, _token)):
+        zeile('Der Browser sollte sich gerade oeffnen.')
+        zeile()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
