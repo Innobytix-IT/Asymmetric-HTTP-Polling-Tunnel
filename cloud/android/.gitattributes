@@ -1,0 +1,20 @@
+# Zeilenenden verbindlich festlegen.
+#
+# Ohne diese Datei entscheidet die Einstellung des jeweiligen Rechners, was
+# beim Auschecken herauskommt. Bei zwei Dateien ist das nicht egal:
+#
+#   gradlew.bat  ist eine Windows-Stapeldatei. Mit LF-Zeilenenden stolpert
+#                cmd.exe an mehrzeiligen Konstrukten -- ein Fehler, der nur
+#                unter Windows auftritt und dort schwer zu deuten ist.
+#   gradlew      ist ein Shell-Skript. Mit CRLF sucht die Shell einen
+#                Interpreter namens "sh\r" und findet ihn nicht.
+#
+# Im Repository steht ueberall LF; `eol` bestimmt nur, was beim Auschecken
+# daraus wird.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+gradlew text eol=lf
+
+*.jar binary
+*.png binary
