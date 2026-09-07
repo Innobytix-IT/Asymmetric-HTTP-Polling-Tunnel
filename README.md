@@ -34,6 +34,7 @@ Ende des Kanals steht.
 |---|---|---|
 | [`kern/`](kern/) | Das generische Protokoll selbst: Vermittler, Agent, Handler-Vertrag. Öffentlich, lesend, ohne eigene Konfiguration eines Nutzers. | fertig |
 | [`cloud/`](cloud/) | Persönliche Cloud: ein einzelner Nutzer, Ende-zu-Ende-Verschlüsselung (Noise IK), Lesen **und** Schreiben, beliebig große Dateien. | fertig |
+| [`cloud3000/`](cloud3000/) | Dieselbe persönliche Cloud, aber nicht mehr an einen einzigen Vermittler gebunden: mehrere Transportwege nebeneinander, darunter der WebDAV-Speicher vieler E-Mail-Anbieter — dort ohne eigenen Code auf dem Vermittler. Fällt ein Weg aus, weicht die nächste Nachricht aus. | nutzbar, WebDAV jung |
 | `messenger/` | Nachrichten zwischen eigenen Geräten über denselben Kanal. | folgt |
 | `mail/` | E-Mail-artiger Austausch ohne eigenen Mailserver. | folgt |
 | `streaming/` | Audio/Video vom Heimserver, blockweise statt als eine große Antwort. | folgt |
@@ -52,6 +53,9 @@ Kopie, die sich unabhängig weiterentwickeln darf.
   `kern/PROTOKOLL.md`.
 - **Eigene Dateien unterwegs erreichbar machen, verschlüsselt:**
   [`cloud/README.md`](cloud/README.md).
+- **Ohne PHP-Webspace auskommen — oder den Ausfall eines Vermittlers
+  überstehen:** [`cloud3000/README.md`](cloud3000/README.md), mit Messungen
+  gegen einen echten WebDAV-Speicher.
 - **Vor dem ersten produktiven Einsatz, in jedem Ordner:** die jeweilige
   `SICHERHEIT.md` — was hält, was wackelt, was ausdrücklich nicht
   geschützt ist.

@@ -2,3 +2,17 @@ __pycache__/
 *.pyc
 node_modules/
 .DS_Store
+
+# Nichts Privates und nichts Gebautes -- in jedem Ordner. Die Vorlagen
+# heissen *-beispiel.*; was ohne "beispiel" heisst, ist eine echte
+# Konfiguration und gehoert niemandem ausser ihrem Betreiber.
+config.toml
+client.toml
+*_privat.toml
+zugang/
+*.key
+relay_token.php
+.ahpt-client-gesundheit.json
+
+# Aus portal/baue_einzeldatei.py erzeugt, nicht von Hand gepflegt.
+ahpt-portal-lokal.html

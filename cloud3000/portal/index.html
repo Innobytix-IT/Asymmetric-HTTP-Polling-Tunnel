@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>AHPT Cloud</title>
+<!-- Terminal-Chevron, als PNG eingebettet -- kein Fremdinhalt.
+     Mit Pillow gezeichnet, nicht per Hand als Zeichenkette
+     abgetippt (das ging beim ersten Versuch schief -- abgeschnittene
+     Base64-Daten, "Incorrect padding"). Zwei Groessen: klein fuer
+     den Browser-Tab, groesser fuer den Startbildschirm. Auf Wunsch
+     vom 03.09.2026. -->
+<link rel="icon" type="image/png" href="data:image/png;base64,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YiOAgcYtbMVel3TrhWtkA8yTHtwgzOXE14SRRpLOC0uoUFeD4d5etmk9AyjkxJilzuCJZVgvYykudSS1oJBiDwO9u0njarw1SmaLSx0YJuIkIoPcAiI4Lhba3CqAuluou4SCABq5VRQLbRg4SiOhiGgunI58YOkjUlcxMZjFjkqtroXgEbBctduDoBCAQjBsr6SumQPizmgQWHTkc+FUWI398bB9cU35asfVIwCipJbbpjuyod7ZxHWNDqE44WZulxNO7GCPhYRcuOotk0UrV2CleutU+2JzeC4IwQEnxq0byF13jwwJgaC3egQQEMOSWNfI7ErGbdMdxIZmljTV3j9df2VJZ/WkaKYTt01deXHBKw90DrKxeieuVbhWAYSoCVRvR1tYoLul130JYk9sZMh+nmkXez94sGimWT1RfuQny52pD83kjbRYywYlbktSuilzAobFsBgGyz1uIY64G4GENjXxdGXyrv2Lp+aJUHmB73KbN9ID9x/OVjt5PSVPIeG1XtT3hE3XhEAEvdz1u6HPiUgIArZj4unKgQcOLz03X6xlpNV779fCe/Hny3vq99T/AB2e5iGf7N8vAAAAAElFTkSuQmCC">
+<link rel="apple-touch-icon" href="data:image/png;base64,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">
+<style>
+:root {
+  /* Terminal-Palette, absichtlich EINE einzige Erscheinung, kein Hell/
+   * Dunkel-Umschalten. Ein Hacker-Terminal in Schwarz-auf-Weiss waere
+   * keines mehr -- das ist hier eine bewusste Entscheidung, keine
+   * vergessene Fallunterscheidung. Gewuenscht am 03.09.2026.
+   *
+   * Kein Webfont -- das Portal laedt bewusst NICHTS von aussen, das
+   * gehoert zum selben Grundsatz wie "kein Fremdinhalt beim Vermittler".
+   * System-Monospace traegt den Terminal-Look trotzdem gut. */
+  --grund: #070b08;
+  --grund-tief: #040604;
+  --flaeche: #0c130d;
+  --flaeche-hoch: #10190f;
+  --rand: #1d3a24;
+  --rand-hell: #2f6a3c;
+  --text: #c9f7d6;
+  --leise: #5fa876;
+  --akzent: #3cff77;
+  --akzent-glut: #8dffb0;
+  --akzent-hell: #0f2717;
+  --warn: #ffb84d;
+  --warn-hell: #2b2109;
+  --fehler: #ff4d6a;
+  --fehler-hell: #2b0c14;
+  --schatten: 0 0 0 1px rgba(60,255,119,.06), 0 10px 30px rgba(0,0,0,.6);
+  --gluehen: 0 0 8px rgba(60,255,119,.55), 0 0 24px rgba(60,255,119,.16);
+  --radius: 3px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--grund); color: var(--text);
+  font: 15px/1.55 ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
+        Consolas, "Fira Code", Menlo, monospace;
+  position: relative;
+}
+::selection { background: var(--akzent); color: #04140a; }
+
+/* Feine, sich wiederholende Linien wie bei einem alten Roehrenbildschirm.
+ * Bewusst schwach (der Text muss weiterhin klar lesbar bleiben) -- ein
+ * Aromastoff, keine Wand. */
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+  background: repeating-linear-gradient(to bottom,
+    rgba(60,255,119,.05) 0px, rgba(60,255,119,.05) 1px,
+    transparent 1px, transparent 3px);
+  mix-blend-mode: overlay;
+}
+#matrix-hintergrund {
+  position: fixed; inset: 0; z-index: 0; opacity: .14;
+}
+header, main, #ablegezone, dialog { position: relative; z-index: 2; }
+
+/* Header und Fortschrittsblock haengen zusammen in EINEM feststehenden
+ * Block, statt einzeln sticky zu sein -- so bleibt der Fortschritt immer
+ * direkt unter dem Header sichtbar, egal wie hoch der Header gerade ist
+ * (er kann auf schmalen Bildschirmen umbrechen). Auf Wunsch vom
+ * 06.09.2026. */
+#kopfbereich { position: sticky; top: 0; z-index: 20; }
+
+header {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 14px 20px; background: var(--flaeche);
+  border-bottom: 1px solid var(--rand-hell);
+}
+.dropdown {
+  position: absolute; right: 0; top: calc(100% + 6px);
+  background: var(--flaeche-hoch); border: 1px solid var(--rand-hell);
+  border-radius: var(--radius); box-shadow: var(--schatten);
+  padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  min-width: 160px; z-index: 30;
+}
+/* Ohne diese Zeile sticht das "display: flex" oben das hidden-Attribut
+ * aus (beide gehoeren zur selben CSS-Herkunft, "display: flex" gewinnt
+ * einfach als das author-seitig gesetzte). Ergebnis waere ein Menue, das
+ * immer offen ist. Gefunden am 06.09.2026, direkt beim ersten Test. */
+.dropdown[hidden] { display: none; }
+.dropdown button { width: 100%; text-align: left; }
+#fortschritt {
+  background: var(--flaeche); border-bottom: 1px solid var(--rand-hell);
+  padding: 10px 20px;
+}
+#fortschritt-text { margin-bottom: 5px; }
+header h1 {
+  font-size: 17px; margin: 0; font-weight: 700; letter-spacing: .4px;
+  color: var(--akzent); text-shadow: var(--gluehen);
+}
+header h1::before { content: '> '; opacity: .65; }
+/* Pulsiert nur, WAEHREND wirklich verbunden ist -- gesetzt in zustand()
+ * unten, nicht dauerhaft. Auf Wunsch vom 03.09.2026. */
+header h1.verbunden { animation: titel-pulsieren 2.6s ease-in-out infinite; }
+@keyframes titel-pulsieren {
+  0%, 100% { text-shadow: var(--gluehen); filter: brightness(1); }
+  50% {
+    text-shadow: 0 0 4px rgba(60,255,119,.35), 0 0 12px rgba(60,255,119,.10);
+    filter: brightness(.72);
+  }
+}
+@media (prefers-reduced-motion: reduce) { header h1.verbunden { animation: none; } }
+header .luecke { flex: 1; }
+.punkt {
+  width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+  background: var(--leise); flex: none;
+}
+.punkt.gut {
+  background: var(--akzent); box-shadow: var(--gluehen);
+  animation: punkt-pulsieren 2.2s ease-in-out infinite;
+}
+.punkt.schlecht { background: var(--fehler); box-shadow: 0 0 8px rgba(255,77,106,.6); }
+@keyframes punkt-pulsieren { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .punkt.gut { animation: none; } }
+#zustand { color: var(--leise); font-size: 13px; }
+
+main { max-width: 1000px; margin: 22px auto; padding: 0 20px 60px; }
+
+.karte {
+  background: var(--flaeche); border: 1px solid var(--rand);
+  border-radius: var(--radius); box-shadow: var(--schatten);
+  padding: 18px 20px; margin-bottom: 18px;
+}
+.karte h2 {
+  margin: 0 0 4px; font-size: 15px; font-weight: 700;
+  color: var(--akzent); letter-spacing: .3px;
+}
+.karte h2::before { content: '# '; opacity: .55; }
+.karte p.hinweis { margin: 0 0 14px; color: var(--leise); font-size: 13px; }
+
+button, .knopf {
+  font: inherit; font-size: 14px; padding: 8px 14px; border-radius: var(--radius);
+  border: 1px solid var(--rand-hell); background: var(--flaeche-hoch); color: var(--text);
+  cursor: pointer; transition: background .12s, border-color .12s, box-shadow .12s;
+}
+button:hover:not(:disabled) {
+  border-color: var(--akzent); color: var(--akzent-glut); box-shadow: var(--gluehen);
+}
+button:disabled { opacity: .4; cursor: default; }
+button.haupt {
+  background: var(--akzent); border-color: var(--akzent); color: #04140a;
+  font-weight: 700; box-shadow: var(--gluehen);
+}
+button.haupt:hover:not(:disabled) { filter: brightness(1.15); color: #04140a; }
+button.gefahr { border-color: var(--warn); color: var(--warn); }
+button.gefahr:hover:not(:disabled) {
+  background: var(--warn-hell); border-color: var(--warn); color: var(--warn);
+  box-shadow: 0 0 10px rgba(255,184,77,.35);
+}
+/* "Aktualisieren" und "Neuer Ordner" gleich breit -- 14ch fasst das
+ * laengere Wort ("Aktualisieren", 13 Zeichen) mit etwas Luft; bei der
+ * Monospace-Schrift ergibt das bei beiden exakt dieselbe Breite,
+ * unabhaengig vom Text. "Dateien hochladen" bleibt bewusst aussen vor.
+ * Auf Wunsch vom 06.09.2026. */
+.btn-gleich { min-width: 14ch; text-align: center; }
+
+input[type=text], input[type=password], textarea {
+  font: inherit; font-size: 14px; width: 100%; padding: 8px 10px;
+  border: 1px solid var(--rand-hell); border-radius: var(--radius);
+  background: var(--grund-tief); color: var(--akzent-glut);
+}
+input:focus, textarea:focus {
+  outline: none; border-color: var(--akzent); box-shadow: var(--gluehen);
+}
+textarea { font-family: inherit; font-size: 12.5px; resize: vertical; }
+label { display: block; font-size: 13px; color: var(--leise); margin: 12px 0 5px; }
+label::before { content: '$ '; opacity: .5; }
+code, .hex {
+  font-family: inherit;
+  font-size: 12.5px; word-break: break-all; color: var(--akzent-glut);
+}
+
+.leiste { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.brotkrumen { display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+              font-size: 14px; }
+.brotkrumen a { color: var(--akzent); cursor: pointer; text-decoration: none; }
+.brotkrumen a:hover { text-decoration: underline; text-shadow: var(--gluehen); }
+.brotkrumen span.trenner { color: var(--leise); }
+
+#liste { overflow-x: auto; }   /* Sicherheitsnetz -- soll durch die Zeile
+                                   darunter ohnehin nie noetig werden. */
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; font-size: 12px; text-transform: uppercase;
+  letter-spacing: .5px; color: var(--leise); font-weight: 600;
+  padding: 6px 10px; border-bottom: 1px solid var(--rand);
+}
+td { padding: 9px 10px; border-bottom: 1px solid var(--rand); font-size: 14px; }
+tr:last-child td { border-bottom: none; }
+tr.zeile:hover { background: var(--akzent-hell); }
+td.rechts { text-align: right; color: var(--leise); white-space: nowrap; }
+td.name { cursor: pointer; }
+td.name .sym {
+  display: inline-block; min-width: 52px; color: var(--leise);
+  font-size: 12px; letter-spacing: .02em;
+}
+.aktionen { display: flex; gap: 6px; justify-content: flex-end; }
+.aktionen button { padding: 4px 10px; font-size: 13px; }
+
+/* Auf schmalen Bildschirmen wird aus der Tabelle eine Liste gestapelter
+ * Zeilen -- die Groesse steht als kleine Zeile unter dem Namen statt in
+ * einer eigenen Spalte. Kein seitliches Schieben mehr noetig: eine
+ * Dateiliste ist etwas, das man auf dem Handy dauernd anschaut, das darf
+ * nicht abgeschnitten aussehen. Am 03.09.2026 auf dem eigenen Handy
+ * gefunden -- die Groesse-Spalte lief rechts aus dem Bildschirm.
+ */
+@media (max-width: 560px) {
+  table thead { display: none; }
+  table, table tbody, table tr, table td { display: block; width: auto; }
+  table tr.zeile {
+    padding: 10px 4px; border-bottom: 1px solid var(--rand);
+  }
+  table tr:last-child { border-bottom: none; }
+  table td { border-bottom: none; padding: 2px 0; }
+  table td.rechts {
+    text-align: left; font-size: 12.5px; white-space: normal;
+  }
+  table td.rechts:empty { display: none; padding: 0; }
+  table .aktionen { justify-content: flex-start; margin-top: 6px; }
+}
+
+.meldung {
+  padding: 11px 40px 11px 14px; border-radius: var(--radius); font-size: 13.5px;
+  margin-bottom: 14px; border: 1px solid transparent; position: relative;
+}
+.meldung.warn { background: var(--warn-hell); border-color: var(--warn); color: var(--warn); }
+.meldung.fehler { background: var(--fehler-hell); border-color: var(--fehler); color: var(--fehler); }
+.meldung.gut { background: var(--akzent-hell); border-color: var(--akzent); color: var(--akzent); }
+.meldung b { font-weight: 700; }
+.meldung .zu {
+  position: absolute; top: 6px; right: 10px; cursor: pointer;
+  background: none; border: 0; color: inherit; opacity: .6;
+  font-size: 18px; line-height: 1; padding: 4px 6px;
+}
+.meldung .zu:hover { opacity: 1; }
+
+#ablegezone {
+  position: fixed; inset: 0; background: rgba(60,255,119,.10);
+  border: 3px dashed var(--akzent); z-index: 50;
+  display: none; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 700; color: var(--akzent);
+  text-shadow: var(--gluehen); backdrop-filter: blur(2px);
+}
+#ablegezone.an { display: flex; }
+
+.balken { height: 4px; background: var(--rand); border-radius: 2px; overflow: hidden; }
+.balken i {
+  display: block; height: 100%; background: var(--akzent); width: 0;
+  box-shadow: var(--gluehen); transition: width .2s;
+}
+
+.leer { text-align: center; color: var(--leise); padding: 34px 10px; font-size: 14px; }
+.klein { font-size: 12.5px; color: var(--leise); }
+.reihe { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.reihe > * { flex: 1; min-width: 200px; }
+.reihe > button { flex: none; }
+dialog {
+  border: 1px solid var(--rand-hell); border-radius: var(--radius);
+  background: var(--flaeche); color: var(--text); max-width: 620px; width: 92%;
+  box-shadow: var(--schatten); padding: 20px;
+}
+dialog::backdrop { background: rgba(0,0,0,.7); }
+#vorschau img, #vorschau iframe { max-width: 100%; border-radius: var(--radius); border: 1px solid var(--rand); }
+#vorschau pre {
+  background: var(--grund-tief); border: 1px solid var(--rand); border-radius: var(--radius);
+  padding: 12px; overflow: auto; max-height: 60vh; font-size: 12.5px;
+}
+</style>
+</head>
+<body>
+
+<canvas id="matrix-hintergrund" aria-hidden="true"></canvas>
+
+<div id="kopfbereich">
+<header>
+  <span class="punkt" id="punkt"></span>
+  <h1 id="titel">AHPT Cloud</h1>
+  <span id="zustand">wird geprueft …</span>
+  <span class="luecke"></span>
+  <button id="btn-menu" title="Men&uuml;" aria-haspopup="true" aria-expanded="false">&hellip;</button>
+  <!-- Am Header verankert, nicht am Knopf: Bricht der Knopf bei schmalem
+       Fenster in eine eigene Zeile um, rutscht er nach LINKS (die
+       Luecke wirkt nur innerhalb derselben Zeile). Ein Menue, das sich
+       am Knopf ausrichtet, liefe dann links aus dem Bildschirm.
+       Am Header bleibt die Ecke immer die tatsaechliche rechte
+       Bildschirmkante. Gefunden und behoben am 06.09.2026. -->
+  <div id="menu-dropdown" class="dropdown" hidden>
+    <button id="btn-einrichten">Einrichtung</button>
+  </div>
+</header>
+
+<!-- Direkt unter dem Header, im selben feststehenden Block -- damit der
+     Fortschritt sichtbar bleibt, auch wenn man weit unten in einer langen
+     Dateiliste unterwegs ist. Vorher stand er zwischen Werkzeugleiste und
+     Liste und scrollte mit weg. Auf Wunsch vom 06.09.2026. -->
+<div id="fortschritt" hidden>
+  <div class="klein" id="fortschritt-text"></div>
+  <div class="balken"><i id="fortschritt-balken"></i></div>
+</div>
+</div>
+
+<main>
+  <div id="meldungen"></div>
+
+  <!-- ------------------------------------------------ Einrichtung ---- -->
+  <section class="karte" id="karte-einrichtung" hidden>
+    <h2>Einrichtung</h2>
+    <p class="hinweis">
+      Dieses Geraet braucht ein eigenes Schluesselpaar und den oeffentlichen
+      Schluessel deines Agenten. Beides bleibt in diesem Browser.
+    </p>
+
+    <div class="reihe">
+      <button id="btn-verbindungsdatei">Verbindungsdatei laden</button>
+      <span class="klein">f&uuml;llt die zwei Felder unten aus dem
+        Assistenten aus &ndash; erspart Abtippen</span>
+    </div>
+    <input type="file" id="feld-verbindungsdatei" accept="application/json,.json" hidden>
+
+    <label>Adresse des Vermittlers (Verzeichnis mit <code>relay.php</code>)</label>
+    <input type="text" id="feld-basis" placeholder="..">
+
+    <label>Oeffentlicher Schluessel dieses Geraets
+      &mdash; in die <code>clients</code>-Liste des Agenten eintragen</label>
+    <div class="reihe">
+      <textarea id="feld-eigen" rows="2" readonly
+                placeholder="noch keiner &ndash; unten erzeugen"></textarea>
+      <button id="btn-kopieren">Kopieren</button>
+      <button id="btn-schluessel">Schluessel erzeugen</button>
+    </div>
+    <div class="klein" id="schluessel-hinweis" style="margin-top:6px"></div>
+
+    <label>Oeffentlicher Schluessel des Agenten
+      &mdash; er steht in dessen Startausgabe</label>
+    <textarea id="feld-agent" rows="2"
+              placeholder="64 Hexzeichen"></textarea>
+
+    <div class="leiste" style="margin-top:16px">
+      <button class="haupt" id="btn-speichern">Speichern und verbinden</button>
+      <button id="btn-vergessen">Alles auf diesem Geraet vergessen</button>
+    </div>
+
+    <div class="meldung warn" style="margin-top:18px">
+      <b>Was das schuetzt und was nicht.</b>
+      Ohne Verschluesselung koennte jeder im Internet die Warteschlange
+      abrufen und deine Dateien mitlesen. Das ist damit zu.
+      Auch gegen den <b>Hoster selbst</b> bist du geschuetzt, solange diese
+      Seite von deinem eigenen Geraet kommt und nicht von seinem Server:
+      dann kann er sie nicht austauschen, und der Webspace ist nur noch
+      Briefkasten. Genau deshalb liegt hier nichts mehr auf dem Webspace
+      &ndash; das Portal dort wurde am 03.09.2026 geloescht. Laedst du diese
+      Seite je von einer fremden Adresse, gilt der Satz nicht mehr.
+      <br><br>
+      Der private Schluessel liegt im Speicher dieses Browsers
+      (<code>localStorage</code>). Auf einem fremden Rechner also besser
+      nicht einrichten.
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------- Dateien ------- -->
+  <section class="karte" id="karte-dateien" hidden>
+    <div class="leiste" style="margin-bottom:14px">
+      <div class="brotkrumen" id="brotkrumen"></div>
+      <span class="luecke" style="flex:1"></span>
+      <input type="text" id="feld-filter" placeholder="Filtern …"
+             style="width:170px">
+      <button class="btn-gleich" id="btn-aktualisieren" title="Neu laden">Aktualisieren</button>
+      <button class="btn-gleich" id="btn-ordner">Neuer Ordner</button>
+      <button class="haupt" id="btn-hoch">Dateien hochladen</button>
+      <input type="file" id="feld-datei" multiple hidden>
+    </div>
+
+    <div id="liste"></div>
+  </section>
+</main>
+
+<div id="ablegezone">Dateien hier ablegen zum Hochladen</div>
+
+<dialog id="vorschau-dialog">
+  <div class="leiste" style="margin-bottom:12px">
+    <b id="vorschau-titel"></b>
+    <span class="luecke" style="flex:1"></span>
+    <button onclick="document.getElementById('vorschau-dialog').close()">Schliessen</button>
+  </div>
+  <div id="vorschau"></div>
+</dialog>
+
+<script src="noise.js"></script>
+<script src="ahpt.js"></script>
+<script>
+'use strict';
+
+const $ = s => document.querySelector(s);
+const SPEICHER = { privat: 'ahpt.privat', agent: 'ahpt.agent', basis: 'ahpt.basis' };
+
+let portal = null;
+let pfad = '';
+let eintraege = [];
+
+/* ---------------------------------------------------- Matrix-Hintergrund */
+//
+// Rein dekorativ, ausdruecklich ohne Wirkung auf irgendetwas Sicherheits-
+// relevantes -- reine Optik, hinter allem, sehr schwach eingeblendet
+// (siehe CSS: opacity .14). Auf Wunsch vom 03.09.2026.
+//
+// Drei Ruecksichten, die eine Hintergrund-Animation nicht vergessen darf:
+//   1. prefers-reduced-motion: reduce -- dann startet sie gar nicht erst.
+//   2. Pausiert, wenn der Tab verborgen ist -- kein Akku fuer eine Seite,
+//      die niemand ansieht.
+//   3. Gedrosselte Bildrate (kein volles requestAnimationFrame-Tempo) --
+//      auf einem Handy, mit dem man ohnehin gerade zwei Bilder pro
+//      Sekunde bräuchte, um Text zu lesen, muss das nicht 60 mal
+//      pro Sekunde neu gezeichnet werden.
+function matrixHintergrund() {
+  const c = document.getElementById('matrix-hintergrund');
+  if (!c || !c.getContext) return;
+  if (window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return;
+  }
+  const ctx = c.getContext('2d');
+  const ZEICHEN = '01アイウエオカキクケコサシスセソタチツテト0123456789ABCDEF';
+  const GROESSE = 15;
+  let spalten = [];
+
+  function einrichten() {
+    c.width = window.innerWidth;
+    c.height = window.innerHeight;
+    const n = Math.ceil(c.width / GROESSE);
+    spalten = new Array(n).fill(0).map(() => Math.random() * -50);
+  }
+  einrichten();
+  window.addEventListener('resize', einrichten);
+
+  let laeuft = !document.hidden;
+  document.addEventListener('visibilitychange', () => {
+    laeuft = !document.hidden;
+  });
+
+  let letzter = 0;
+  function bild(zeit) {
+    requestAnimationFrame(bild);
+    if (!laeuft || zeit - letzter < 80) return;   // ~12 Bilder/s reichen
+    letzter = zeit;
+
+    ctx.fillStyle = 'rgba(4,6,4,.13)';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.font = GROESSE + 'px monospace';
+    ctx.fillStyle = '#3cff77';
+
+    for (let i = 0; i < spalten.length; i++) {
+      const z = ZEICHEN[Math.floor(Math.random() * ZEICHEN.length)];
+      ctx.fillText(z, i * GROESSE, spalten[i] * GROESSE);
+      if (spalten[i] * GROESSE > c.height && Math.random() > .975) {
+        spalten[i] = 0;
+      }
+      spalten[i]++;
+    }
+  }
+  requestAnimationFrame(bild);
+}
+matrixHintergrund();
+
+/* ------------------------------------------------------------ Meldungen */
+
+function esc(s) {
+  // HTML entschaerfen -- fuer jeden Wert, der in einen melde()-Text
+  // eingesetzt wird und NICHT selbst festverdrahtetes Markup ist (Datei-
+  // und Ordnernamen, Fehlermeldungen).
+  //
+  // Ein Dateiname kann auf den meisten Dateisystemen praktisch jedes
+  // Zeichen tragen -- < > " kommen durch _pfad_erlaubt() im Handler NICHT
+  // heraus gefiltert, das dort nur Steuerzeichen sperrt. Ungeschaerft in
+  // innerHTML eingesetzt waere ein Dateiname wie
+  // "<img src=x onerror=...>" gespeichertes XSS: Sobald jemand die Datei
+  // herunterlaedt, in der Vorschau oeffnet oder sie beim Hochladen
+  // rueckgemeldet bekommt, liefe das Skript im Ursprung dieses Portals --
+  // und griffe damit auf den privaten Schluessel in localStorage zu.
+  //
+  // Am 03.09.2026 im Sicherheitsaudit gefunden: `pre.textContent` fuer den
+  // DATEIINHALT stand schon richtig da (mit Begruendung im Kommentar), aber
+  // derselbe Fall fuer den DATEINAMEN in melde() fehlte.
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[c]);
+}
+
+function melde(text, art, dauerhaft) {
+  // Doppelte identische Meldung wegwerfen -- sie stapelten sich sonst
+  // sichtbar, wenn der Nutzer zweimal denselben Fehler ausloest (etwa:
+  // eine zu grosse Datei erneut hinaufziehen).
+  const zusammen = (art || 'gut') + '|' + text;
+  const alt = $('#meldungen').lastElementChild;
+  if (alt && alt.dataset.kennung === zusammen) return alt;
+
+  const d = document.createElement('div');
+  d.className = 'meldung ' + (art || 'gut');
+  d.dataset.kennung = zusammen;
+  d.innerHTML = text;
+  if (dauerhaft) {
+    // Schliessen-Knopf. Dauerhafte Meldungen bleiben sonst stehen, bis
+    // der Nutzer die Seite neu laedt -- und sie stapeln sich untereinander.
+    const zu = document.createElement('button');
+    zu.className = 'zu';
+    zu.setAttribute('aria-label', 'Meldung schliessen');
+    zu.textContent = '×';
+    zu.onclick = () => d.remove();
+    d.appendChild(zu);
+  } else {
+    setTimeout(() => d.remove(), 7000);
+  }
+  $('#meldungen').appendChild(d);
+  return d;
+}
+function meldungenLeeren() { $('#meldungen').innerHTML = ''; }
+
+function zustand(text, art) {
+  $('#zustand').textContent = text;
+  $('#punkt').className = 'punkt ' + (art || '');
+  $('#titel').classList.toggle('verbunden', art === 'gut');
+}
+
+/* --------------------------------------------------------- Einrichtung */
+
+function lies(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function schreib(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+function zeigeEinrichtung(an) {
+  $('#karte-einrichtung').hidden = !an;
+  $('#karte-dateien').hidden = an;
+}
+
+$('#btn-einrichten').onclick = () => zeigeEinrichtung($('#karte-einrichtung').hidden);
+
+/* Das "..."-Menue: oeffnet/schliesst per Klick auf den Knopf, schliesst
+ * sich sonst bei jedem Klick anderswo auf der Seite -- auch nach einem
+ * Klick auf "Einrichtung" selbst, weil dessen Klick zum Dokument
+ * durchreicht. Auf Wunsch vom 06.09.2026. */
+{
+  const menuKnopf = $('#btn-menu');
+  const menu = $('#menu-dropdown');
+  menuKnopf.onclick = (e) => {
+    e.stopPropagation();
+    const offen = menu.hidden;
+    menu.hidden = !offen;
+    menuKnopf.setAttribute('aria-expanded', String(offen));
+  };
+  document.addEventListener('click', () => {
+    menu.hidden = true;
+    menuKnopf.setAttribute('aria-expanded', 'false');
+  });
+}
+
+/* Der Knopf sagt, was er tut -- und sieht anders aus, wenn es schon einen
+   Schluessel gibt.
+
+   Ein Knopf, der eine bestehende Paarung ungueltig macht, darf nicht
+   aussehen wie eine harmlose Wiederholung. Am 03.09.2026 genau so
+   passiert: Die Verbindung stand bereits, ein zweiter Druck erzeugte einen
+   neuen Schluessel, und der Agent kannte das Geraet nicht mehr. Die
+   Fehlermeldung war richtig ("steht der Schluessel in der clients-Liste?")
+   und half trotzdem nicht weiter, weil niemand vermutete, dass er sich
+   gerade selbst ausgesperrt hatte. */
+function knopfAnpassen() {
+  const da = !!lies(SPEICHER.privat);
+  const b = $('#btn-schluessel');
+  b.textContent = da ? 'Schluessel ERSETZEN' : 'Schluessel erzeugen';
+  b.className = da ? 'gefahr' : 'haupt';
+  $('#schluessel-hinweis').innerHTML = da
+    ? 'Dieses Geraet hat bereits einen Schluessel. <b>Ein neuer macht die '
+      + 'Paarung ungueltig</b> &ndash; der Agent kennt ihn dann nicht mehr, '
+      + 'und du muesstest ihn dort erneut eintragen. Zum Verbinden genuegt '
+      + '&bdquo;Speichern und verbinden&ldquo;.'
+    : 'Noch keiner. Einmal erzeugen, dann beim Agenten in die '
+      + '<code>clients</code>-Liste eintragen.';
+}
+
+$('#btn-schluessel').onclick = async () => {
+  if (lies(SPEICHER.privat) &&
+      !confirm('Dieses Geraet hat schon einen Schluessel, und der Agent '
+               + 'kennt ihn vermutlich.\n\n'
+               + 'Ein NEUER macht die Paarung ungueltig: Der Agent wuerde '
+               + 'nicht mehr antworten, bis du den neuen Wert dort '
+               + 'eingetragen und ihn neu gestartet hast.\n\n'
+               + 'Zum blossen Verbinden brauchst du das NICHT -- dafuer '
+               + 'genuegt "Speichern und verbinden".\n\n'
+               + 'Wirklich ersetzen?')) return;
+  const p = await schluesselpaar();
+  schreib(SPEICHER.privat, bytesZuHex(p.roh));
+  $('#feld-eigen').value = bytesZuHex(p.oeffentlich);
+  knopfAnpassen();
+  melde('Schluessel erzeugt. Trage den oeffentlichen Wert oben in die '
+        + '<code>clients</code>-Liste der <code>config.toml</code> deines '
+        + 'Agenten ein und starte ihn neu.', 'warn', true);
+};
+
+$('#btn-kopieren').onclick = async () => {
+  const w = $('#feld-eigen').value.trim();
+  if (!w) return;
+  try { await navigator.clipboard.writeText(w); melde('Kopiert.'); }
+  catch (e) { $('#feld-eigen').select(); melde('Bitte von Hand kopieren.', 'warn'); }
+};
+
+$('#btn-verbindungsdatei').onclick = () => $('#feld-verbindungsdatei').click();
+$('#feld-verbindungsdatei').onchange = async ev => {
+  const datei = ev.target.files[0];
+  ev.target.value = '';
+  if (!datei) return;
+  let d;
+  try {
+    d = JSON.parse(await datei.text());
+  } catch (e) {
+    melde('Diese Datei ist kein gueltiges JSON.', 'fehler');
+    return;
+  }
+  // Form pruefen, nicht nur hoffen, dass sie stimmt -- dieselbe Haltung
+  // wie ueberall sonst hier: eine Datei mit falschem Inhalt soll eine
+  // klare Absage bekommen, kein stilles Falsch-Ausfuellen.
+  if (d.typ !== 'ahpt-verbindung' || typeof d.basis !== 'string'
+      || !/^[0-9a-f]{64}$/i.test(d.agent_oeffentlich || '')) {
+    melde('Das ist keine Verbindungsdatei des Assistenten (falscher '
+          + 'Aufbau).', 'fehler');
+    return;
+  }
+  $('#feld-basis').value = d.basis;
+  $('#feld-agent').value = d.agent_oeffentlich.toLowerCase();
+  melde('Adresse und Agent-Schl&uuml;ssel eingetragen. Fehlt noch: '
+        + 'Schl&uuml;ssel erzeugen (falls neu) und speichern.', 'gut');
+};
+
+$('#btn-vergessen').onclick = () => {
+  if (!confirm('Schluessel und Einstellungen dieses Geraets loeschen?\n\n'
+               + 'Auf dem Server aendert das nichts.')) return;
+  Object.values(SPEICHER).forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+  location.reload();
+};
+
+$('#btn-speichern').onclick = async () => {
+  const agentHex = $('#feld-agent').value.trim().toLowerCase().replace(/[^0-9a-f]/g, '');
+  if (agentHex.length !== 64) {
+    melde('Der Schluessel des Agenten muss 64 Hexzeichen haben '
+          + '(hat ' + agentHex.length + ').', 'fehler');
+    return;
+  }
+  if (!lies(SPEICHER.privat)) {
+    melde('Dieses Geraet hat noch keinen eigenen Schluessel. '
+          + 'Erst „Neu erzeugen“ druecken.', 'fehler');
+    return;
+  }
+  schreib(SPEICHER.agent, agentHex);
+  const basis = $('#feld-basis').value.trim() || '..';
+  schreib(SPEICHER.basis, basis);
+  meldungenLeeren();
+
+  // Viele kostenlose Webspaces liefern kein https fuer den eigenen Bereich
+  // aus -- Port 443 zeigt dort oft eine ganz andere Seite. Chrome und
+  // manche Tastaturen wandeln http:// aber gern eigenmaechtig in https://
+  // um ("Immer sichere Verbindungen"), ohne dass der Nutzer es bemerkt.
+  // Am 03.09.2026 genau so erlebt: die Adresse stand am Ende auf https,
+  // obwohl http eingetippt worden war, und die Fehlermeldung ("Vermittler
+  // nicht erreichbar") verriet nicht, WARUM.
+  //
+  // Kein hartes Verbot -- manche Webspaces haben echtes https, das soll
+  // weiter funktionieren. Nur ein Hinweis, an der Stelle, wo er etwas
+  // nuetzt.
+  if (/^https:\/\//i.test(basis)) {
+    melde('Die Adresse beginnt mit <code>https://</code>. Funktioniert '
+          + 'gleich nichts: viele kostenlose Webspaces liefern darueber '
+          + 'gar nicht dein Verzeichnis aus, sondern eine ganz andere '
+          + 'Seite. Manche Tastaturen und Chrome selbst wandeln '
+          + '<code>http://</code> eigenmaechtig um. Falls die Verbindung '
+          + 'gleich fehlschlaegt: erneut versuchen, diesmal mit '
+          + '<code>http://</code>.', 'warn', true);
+  }
+
+  await verbinden();
+};
+
+/* ------------------------------------------------------------ Verbinden */
+
+async function verbinden() {
+  const verf = await kryptoVerfuegbar();
+  if (!verf.ok) {
+    zustand('Verschluesselung nicht moeglich', 'schlecht');
+    melde('<b>Dieses Portal kann hier nicht verschluesseln.</b> ' + esc(verf.grund)
+          + '<br><br>Der haeufigste Grund: Die Seite wurde ueber <code>http://</code> '
+          + 'geoeffnet. Browser geben WebCrypto nur ueber <code>https://</code> '
+          + 'oder auf <code>localhost</code> frei. Ohne Verschluesselung '
+          + 'arbeitet dieses Portal <b>nicht</b> &ndash; unverschluesselt laege '
+          + 'jede Datei fuer jeden lesbar auf dem Webspace.', 'fehler', true);
+    zeigeEinrichtung(true);
+    return;
+  }
+
+  const priv = lies(SPEICHER.privat), ag = lies(SPEICHER.agent);
+  $('#feld-basis').value = lies(SPEICHER.basis) || '..';
+  if (priv) $('#feld-eigen').value = bytesZuHex(await oeffentlichZu(hexZuBytes(priv)));
+  knopfAnpassen();
+  if (ag) $('#feld-agent').value = ag;
+
+  if (!priv || !ag) {
+    zustand('noch nicht eingerichtet');
+    zeigeEinrichtung(true);
+    return;
+  }
+
+  portal = new AhptPortal(lies(SPEICHER.basis) || '..',
+                          hexZuBytes(priv), hexZuBytes(ag));
+  zeigeEinrichtung(false);
+  await lade('');
+}
+
+/* -------------------------------------------------------------- Dateien */
+
+function groesse(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KiB';
+  return (b / 1048576).toFixed(1) + ' MiB';
+}
+
+function brotkrumen() {
+  const el = $('#brotkrumen');
+  el.innerHTML = '';
+  const teile = pfad ? pfad.split('/') : [];
+  const mach = (text, ziel) => {
+    const a = document.createElement('a');
+    a.textContent = text;
+    a.onclick = () => lade(ziel);
+    el.appendChild(a);
+  };
+  mach('Start', '');
+  let bis = '';
+  for (const t of teile) {
+    bis = bis ? bis + '/' + t : t;
+    const s = document.createElement('span');
+    s.className = 'trenner'; s.textContent = '/';
+    el.appendChild(s);
+    mach(t, bis);
+  }
+}
+
+function dateiTag(name) {
+  // Terminal-Kennzeichen statt Emoji: [DIR], [PDF], [JPG] ... zeigt auf
+  // einen Blick mehr als ein Symbol es koennte. Reine Textverarbeitung --
+  // das Ergebnis geht ausschliesslich ueber textContent hinaus, nie ueber
+  // innerHTML (siehe die Begruendung an der Aufrufstelle).
+  const punkt = name.lastIndexOf('.');
+  if (punkt <= 0 || punkt === name.length - 1) return 'FILE';
+  const ext = name.slice(punkt + 1).toUpperCase();
+  return ext.length <= 4 ? ext : ext.slice(0, 4);
+}
+
+function zeichne() {
+  const filter = $('#feld-filter').value.trim().toLowerCase();
+  const sicht = eintraege.filter(e => !filter || e.name.toLowerCase().includes(filter));
+  const ziel = $('#liste');
+
+  if (!sicht.length) {
+    ziel.innerHTML = '<div class="leer">'
+      + (eintraege.length ? 'Nichts passt zum Filter.'
+                          : 'Dieser Ordner ist leer. Dateien hierher ziehen zum Hochladen.')
+      + '</div>';
+    return;
+  }
+
+  const t = document.createElement('table');
+  t.innerHTML = '<thead><tr><th>Name</th><th class="rechts">Groesse</th>'
+              + '<th class="rechts"></th></tr></thead>';
+  const koerper = document.createElement('tbody');
+  // Ordner zuerst, dann alphabetisch -- so, wie man es erwartet.
+  sicht.sort((a, b) => (a.art === b.art)
+    ? a.name.localeCompare(b.name, 'de')
+    : (a.art === 'ordner' ? -1 : 1));
+
+  for (const e of sicht) {
+    const tr = document.createElement('tr');
+    tr.className = 'zeile';
+    const ordner = e.art === 'ordner';
+    const unter = pfad ? pfad + '/' + e.name : e.name;
+
+    const td1 = document.createElement('td');
+    td1.className = 'name';
+    // ueber createElement/textContent, NIE ueber innerHTML: dateiTag()
+    // leitet sich aus e.name ab, und e.name kann praktisch jedes Zeichen
+    // enthalten (siehe esc() weiter oben -- derselbe Grund gilt hier).
+    const sym = document.createElement('span');
+    sym.className = 'sym';
+    sym.textContent = ordner ? '[DIR]' : '[' + dateiTag(e.name) + ']';
+    td1.appendChild(sym);
+    td1.appendChild(document.createTextNode(' ' + e.name));
+    td1.onclick = () => ordner ? lade(unter) : vorschau(unter, e.name);
+    tr.appendChild(td1);
+
+    const td2 = document.createElement('td');
+    td2.className = 'rechts';
+    td2.textContent = ordner ? '' : groesse(e.bytes || 0);
+    tr.appendChild(td2);
+
+    const td3 = document.createElement('td');
+    td3.className = 'rechts';
+    if (!ordner) {
+      const d = document.createElement('div');
+      d.className = 'aktionen';
+      const b = document.createElement('button');
+      b.textContent = 'Herunterladen';
+      b.onclick = ev => { ev.stopPropagation(); herunterladen(unter, e.name); };
+      d.appendChild(b);
+      td3.appendChild(d);
+    }
+    tr.appendChild(td3);
+    koerper.appendChild(tr);
+  }
+  t.appendChild(koerper);
+  ziel.innerHTML = '';
+  ziel.appendChild(t);
+}
+
+async function lade(neuerPfad) {
+  pfad = neuerPfad || '';
+  brotkrumen();
+  $('#liste').innerHTML = '<div class="leer">wird geholt …</div>';
+  zustand('fragt an …');
+  try {
+    const d = await portal.liste(pfad);
+    eintraege = d.eintraege || [];
+    zeichne();
+    zustand('verbunden, verschluesselt', 'gut');
+
+    // Warum die Liste kuerzer sein kann, als der Ordner Eintraege hat.
+    // Eine unvollstaendige Liste, die wie eine vollstaendige aussieht, ist
+    // schlimmer als eine Fehlermeldung.
+    if (d.gekappt) {
+      melde('Nur die ersten <b>' + d.gekappt + '</b> Eintraege werden gezeigt. '
+            + 'Der Ordner enthaelt mehr.', 'warn');
+    }
+    if (d.endung_gesperrt) {
+      melde(d.endung_gesperrt + ' Datei(en) nicht gezeigt &ndash; ihre Endung '
+            + 'steht nicht in der <code>endungen</code>-Liste des Agenten.', 'warn');
+    }
+  } catch (e) {
+    eintraege = [];
+    $('#liste').innerHTML = '<div class="leer">nichts geladen</div>';
+    zustand('Fehler', 'schlecht');
+    melde('<b>Konnte nicht laden.</b> ' + esc(e.message), 'fehler', true);
+  }
+}
+
+function fortschritt(text, anteil) {
+  $('#fortschritt').hidden = text === null;
+  if (text === null) return;
+  $('#fortschritt-text').textContent = text;
+  $('#fortschritt-balken').style.width = Math.round((anteil || 0) * 100) + '%';
+}
+
+async function herunterladen(voll, name) {
+  fortschritt('holt ' + name + ' …', 0.15);
+  try {
+    const d = await portal.hole(voll, s => {
+      if (s.art === 'warten') fortschritt('wartet auf den Agenten …', 0.4);
+    });
+    const url = URL.createObjectURL(new Blob([d.bytes]));
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    melde('<b>' + esc(name) + '</b> geholt (' + groesse(d.bytes.length) + ').');
+  } catch (e) {
+    melde('<b>' + esc(name) + '</b> nicht geholt: ' + esc(e.message), 'fehler', true);
+  } finally { fortschritt(null); }
+}
+
+const TEXT_ENDUNGEN = ['txt', 'md', 'csv', 'json', 'log', 'ini', 'toml', 'yml'];
+const BILD_ENDUNGEN = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'];
+
+async function vorschau(voll, name) {
+  const e = (name.split('.').pop() || '').toLowerCase();
+  if (!TEXT_ENDUNGEN.includes(e) && !BILD_ENDUNGEN.includes(e) && e !== 'pdf') {
+    return herunterladen(voll, name);
+  }
+  fortschritt('holt ' + name + ' …', 0.15);
+  try {
+    const d = await portal.hole(voll, s => {
+      if (s.art === 'warten') fortschritt('wartet auf den Agenten …', 0.4);
+    });
+    const ziel = $('#vorschau');
+    ziel.innerHTML = '';
+    $('#vorschau-titel').textContent = name;
+    if (BILD_ENDUNGEN.includes(e)) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(new Blob([d.bytes]));
+      ziel.appendChild(img);
+    } else if (e === 'pdf') {
+      const f = document.createElement('iframe');
+      f.src = URL.createObjectURL(new Blob([d.bytes], { type: 'application/pdf' }));
+      f.style.width = '100%'; f.style.height = '70vh';
+      ziel.appendChild(f);
+    } else {
+      // textContent, nie innerHTML: Der Inhalt kommt vom Server, und selbst
+      // im eigenen Portal wird fremder Text nicht als Markup eingehaengt.
+      const pre = document.createElement('pre');
+      pre.textContent = new TextDecoder().decode(d.bytes);
+      ziel.appendChild(pre);
+    }
+    $('#vorschau-dialog').showModal();
+  } catch (err) {
+    melde('<b>' + esc(name) + '</b> nicht geholt: ' + esc(err.message), 'fehler', true);
+  } finally { fortschritt(null); }
+}
+
+/* ----------------------------------------------------------- Hochladen */
+
+async function hochladen(dateien) {
+  const liste = Array.from(dateien);
+  let i = 0;
+  for (const f of liste) {
+    i++;
+    const vor = liste.length > 1 ? '(' + i + '/' + liste.length + ') ' : '';
+    fortschritt(vor + 'verschluesselt ' + f.name + ' …', 0.1);
+    try {
+      // Die Datei selbst hinaufreichen -- nicht ihre Bytes.
+      //
+      // Ein Uint8Array haelt die ganze Datei im Speicher; bei einer
+      // Sprachnotiz egal, bei einem 200-MiB-Video bricht das Handy zusammen.
+      // Das Portal liest sie unten blockweise ueber blob.slice().
+      const ziel = pfad ? pfad + '/' + f.name : f.name;
+      const d = await portal.lege(ziel, f, s => {
+        if (s.art === 'summe') {
+          fortschritt(vor + 'pruefsumme … ' + f.name, 0.05);
+        } else if (s.art === 'hoch') {
+          fortschritt(vor + 'laedt ' + f.name + ' … Stueck ' + s.getan
+                      + '/' + s.gesamt, 0.1 + 0.8 * (s.getan / s.gesamt));
+        } else {
+          fortschritt(vor + 'wartet auf den Agenten …', 0.95);
+        }
+      });
+      // Der Server nennt den Namen, unter dem die Datei WIRKLICH liegt.
+      // Ueberschrieben wird nie -- wer das verschweigt, laesst den Nutzer
+      // glauben, er habe eine aeltere Fassung ersetzt.
+      if (d.abgelegt && d.abgelegt !== ziel) {
+        melde('<b>' + esc(f.name) + '</b> abgelegt als <b>'
+              + esc(d.abgelegt.split('/').pop()) + '</b> &ndash; unter dem '
+              + 'urspruenglichen Namen lag schon etwas. Ueberschrieben wird nie.',
+              'warn', true);
+      } else {
+        melde('<b>' + esc(f.name) + '</b> abgelegt (' + groesse(d.bytes || 0) + ').');
+      }
+    } catch (e) {
+      melde('<b>' + esc(f.name) + '</b> nicht abgelegt: ' + esc(e.message), 'fehler', true);
+    }
+  }
+  fortschritt(null);
+  await lade(pfad);
+}
+
+$('#btn-hoch').onclick = () => $('#feld-datei').click();
+$('#feld-datei').onchange = ev => {
+  if (ev.target.files.length) hochladen(ev.target.files);
+  ev.target.value = '';
+};
+
+$('#btn-ordner').onclick = async () => {
+  const name = prompt('Name des neuen Ordners:');
+  if (!name) return;
+  try {
+    await portal.neuerOrdner(pfad ? pfad + '/' + name : name);
+    melde('Ordner <b>' + esc(name) + '</b> angelegt.');
+    await lade(pfad);
+  } catch (e) {
+    melde('Ordner nicht angelegt: ' + esc(e.message), 'fehler', true);
+  }
+};
+
+$('#btn-aktualisieren').onclick = () => lade(pfad);
+$('#feld-filter').oninput = zeichne;
+
+/* Ziehen und Ablegen. Der Zaehler verhindert, dass die Zone beim Wandern
+   ueber Kindelemente flackert. */
+let ziehTiefe = 0;
+window.addEventListener('dragenter', e => {
+  if (!portal) return;
+  e.preventDefault(); ziehTiefe++; $('#ablegezone').classList.add('an');
+});
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('dragleave', e => {
+  if (--ziehTiefe <= 0) { ziehTiefe = 0; $('#ablegezone').classList.remove('an'); }
+});
+window.addEventListener('drop', e => {
+  e.preventDefault(); ziehTiefe = 0;
+  $('#ablegezone').classList.remove('an');
+  if (portal && e.dataTransfer.files.length) hochladen(e.dataTransfer.files);
+});
+
+verbinden();
+</script>
+</body>
+</html>

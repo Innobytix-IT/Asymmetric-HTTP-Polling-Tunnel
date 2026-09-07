@@ -1,0 +1,46 @@
+# .htaccess fuer das ABLAGEVERZEICHNIS (<basis>/ahpt/)
+#
+# Nur eine einzige Aufgabe: die CORS-Kopfzeile, damit ein Portal, das NICHT
+# von diesem Webspace kommt, die Antwortdateien holen kann. Etwa eines, das
+# auf der eigenen Maschine laeuft -- und nur so traegt die Verschluesselung
+# auch gegen den Hoster, weil er die Seite dann nicht austauschen kann.
+#
+# WARUM NICHT IM ELTERNVERZEICHNIS: Dort steht relay.php, und die setzt ihre
+# CORS-Kopfzeile selbst. Zwei gleiche Kopfzeilen weist der Browser ab.
+#
+# WARUM `always`: Ohne dieses Wort setzt Apache die Kopfzeile nur bei
+# ERFOLGREICHEN Antworten. Das Portal fragt aber im Takt nach
+# `antwort_<marke>.json` und bekommt bis zur Antwort lauter 404 -- und ein
+# 404 ohne CORS erreicht das JavaScript nicht als 404, sondern als
+# Netzfehler. Am 03.09.2026 im Browser gemessen: Die Warteschlange kam
+# durch, das Abholen scheiterte, und die Meldung deutete auf eine Umleitung,
+# wo keine war.
+#
+# Node hatte das nicht gefunden -- dort gibt es keine CORS-Pruefung. Nur ein
+# echter Browser konnte es zeigen.
+#
+# UNBEDENKLICH, weil hier ausschliesslich Frage- und Antwortdateien liegen:
+# Die sind ohnehin ohne Anmeldung abrufbar -- sie muessen es sein, sonst
+# gaebe es den Kostenvorteil nicht -- und bei eingeschalteter
+# Verschluesselung enthalten sie nur Rauschen.
+<IfModule mod_headers.c>
+  Header always set Access-Control-Allow-Origin "*"
+  Header always set Access-Control-Allow-Methods "GET, OPTIONS"
+</IfModule>
+
+# Die Fehlerseite selbst uebernehmen.
+#
+# Der Hoster liefert seine eigene 404-Seite aus einem anderen Verzeichnis
+# aus -- und dort gilt diese .htaccess nicht mehr, also fehlt der 404 die
+# CORS-Kopfzeile. Mit einer eigenen, unmittelbar hier definierten Antwort
+# bleibt die Bearbeitung im selben Verzeichnis, und die Kopfzeile gilt.
+#
+# Der Inhalt ist bewusst leeres JSON: Das Portal fragt im Takt nach einer
+# Antwort, die es noch nicht gibt. Das ist der NORMALFALL, kein Fehler --
+# und eine 40 KB grosse Werbeseite als Antwort darauf waere Verschwendung.
+ErrorDocument 404 "{}"
+ErrorDocument 403 "{}"
+
+# Kein Verzeichnislisting -- die Marken sind nicht erratbar, ein Listing
+# machte das Raten unnoetig.
+Options -Indexes

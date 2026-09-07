@@ -1,0 +1,160 @@
+# AHPT Cloud 3000 -- Agent auf dem Heimserver
+#
+# Kopieren nach config.toml und anpassen. Alles hier wird BEIM START
+# geprueft: Was fehlt oder unplausibel ist, laesst den Agenten gar nicht
+# erst anlaufen. Ein Agent mit halber Konfiguration antwortet auf jede Frage
+# "nichts gefunden" -- und das sieht von aussen aus wie ein leerer Ordner,
+# nicht wie ein Fehler.
+
+[relay]
+
+# Das Verzeichnis auf dem Webspace, in dem relay.php liegt.
+#
+# MUSS https sein -- ueber http reist das geteilte Geheimnis des Agenten im
+# Klartext mit. Einzige Ausnahme ist Loopback. Das gilt AUCH bei
+# eingeschalteter Verschluesselung: Noise schuetzt die Nutzlast, nicht die
+# Kopfzeile `X-AHPT-Auth`, mit der sich der Agent beim Vermittler ausweist.
+basis = "https://example.de/ahpt"
+
+geheimnis_datei = "~/.ahpt/geheimnis"
+poll_abstand    = 1.0
+unbedingt_nach  = 30
+
+# Womit sich dieser Agent in jedem Zugriffs-Log jedes Anbieters ausweist.
+#
+# OHNE Eintrag gilt die Vorgabe aus netz.py: eine gewoehnliche
+# Browser-Kennung. Das ist eine bewusste Entscheidung und keine
+# Notwendigkeit -- sie taeuscht einfache Log-Auswertung und
+# Rate-Begrenzung, und sie behauptet gegenueber dem Anbieter etwas
+# anderes, als der Agent ist. Die Abwaegung dazu steht in SICHERHEIT.md,
+# Abschnitt "Die Kennung".
+#
+# Wer den eigenen Verkehr erkennbar halten will, traegt hier schlicht
+# einen selbstnennenden Wert ein:
+#
+#     kennung = "AHPT-Agent/1"
+
+
+[krypto]
+
+# "keine"     -- wie im oeffentlichen AHPT. Alles liegt lesbar auf dem
+#                Webspace. Fuer eigene Dateien nicht geeignet.
+# "noise_ik"  -- Ende-zu-Ende verschluesselt. Der Webspace sieht Rauschen.
+#
+# Der Agent weist eine Frage mit dem jeweils ANDEREN Verfahren ab. Das ist
+# Absicht: Eine Verschluesselung, die sich abschalten laesst, indem man sie
+# weglaesst, ist keine.
+verfahren = "noise_ik"
+
+# Der private Schluessel dieses Agenten. Einmalig erzeugen mit:
+#
+#     python3 krypto.py --erzeuge ~/.ahpt/agent.key
+#
+# Der Befehl gibt den OEFFENTLICHEN Teil aus. Der gehoert in die
+# Konfiguration des Clients -- VON HAND uebertragen, per SSH oder USB-Stick,
+# niemals ueber den Webspace. Was dort liegt, kann der Hoster austauschen,
+# und genau das soll die Verschluesselung verhindern.
+schluessel = "~/.ahpt/agent.key"
+
+# Wer fragen darf: die oeffentlichen Schluessel der eigenen Geraete.
+#
+# Eine Weissliste, und eine leere waere keine: Der oeffentliche Schluessel
+# des Agenten ist kein Geheimnis, also koennte ihn sonst jeder bedienen, der
+# ihn kennt. Der Agent laeuft mit leerer Liste nicht an.
+#
+# Auf jedem Geraet einmal:  python3 krypto.py --erzeuge ~/.ahpt/client.key
+clients = [
+  # "aabbcc…  64 Hexzeichen -- Laptop",
+  # "ddeeff…  64 Hexzeichen -- Zweitrechner",
+]
+
+
+# ------------------------------------------------------------ Transportwege
+#
+# DAS IST DER UNTERSCHIED ZU AHPT CLOUD. Dort gibt es genau einen Weg zum
+# Vermittler: den PHP-Webspace aus [relay] oben. Hier duerfen mehrere
+# nebeneinander stehen, und jede einzelne Nachricht sucht sich der Reihe
+# nach einen aus, der gerade traegt.
+#
+# [relay] oben BLEIBT dabei der erste Weg -- unter dem Namen "php". Diese
+# Datei ohne einen einzigen [[transport]]-Abschnitt verhaelt sich also
+# genau wie AHPT Cloud. Jeder Abschnitt hier kommt hinzu.
+#
+# Wozu ueberhaupt mehrere: Ein einzelner Vermittler ist ein einzelner
+# Ausfall und ein einzelner Mitwisser. Zwei Wege bei zwei UNABHAENGIGEN
+# Anbietern ueberstehen den Ausfall eines Rechenzentrums, und ein
+# gesperrtes Konto beendet nicht den Betrieb, sondern einen Weg davon.
+#
+#   name    Frei waehlbar, aber je Weg einmalig -- er steht in den
+#           Meldungen und im Gesundheits-Gedaechtnis. "php" ist fuer
+#           [relay] oben vergeben.
+#   rolle   "frage", "antwort" oder "beide" (Vorgabe). Damit laesst sich
+#           ein Weg auf eine Richtung festlegen -- etwa ein schneller
+#           WebDAV-Speicher fuer die grossen Antworten, waehrend die
+#           kleinen Fragen weiter ueber PHP gehen.
+#
+# Faellt ein Weg wiederholt aus, wird er voruebergehend gesperrt, statt
+# bei JEDER Nachricht erneut seine volle Frist verstreichen zu lassen
+# (transport.Gesundheit). Nach der Sperrzeit genau ein Testversuch.
+
+# -- Ein WebDAV-Speicher, wie ihn viele E-Mail-Anbieter mitliefern -------
+#
+# Braucht keinerlei eigenen Code auf dem Vermittler: WebDAV ist ein
+# Standardprotokoll fuer Dateizugriff, PUT/GET/DELETE/PROPFIND genuegen.
+# Kein relay.php, kein Webspace mit PHP.
+#
+# ZWEI DINGE VORHER LESEN, beide in SICHERHEIT.md:
+#   * Ein WebDAV-Konto ist meist DASSELBE Konto wie das E-Mail-Postfach.
+#     Wer das Passwort erbeutet, hat beides. Darum ein eigenes Konto und
+#     ein anwendungsspezifisches Passwort, nie das Hauptpasswort.
+#   * Die AGB der Anbieter sind auf Privatnutzung zugeschnitten, nicht auf
+#     automatisierten Zugriff. Kein ausdrueckliches Verbot gefunden, aber
+#     auch keine Erlaubnis -- und eine Sperrung ist jederzeit moeglich.
+#
+# [[transport]]
+# art            = "webdav"
+# name           = "cloud-des-mailanbieters"
+# rolle          = "beide"
+# basis          = "https://webdav.example.net"
+# benutzer       = "konto@example.net"
+#
+# Eine Datei, EINE Zeile, sonst nichts -- genau wie geheimnis_datei.
+# Das Passwort steht nirgends in dieser Konfiguration und taucht in
+# keiner Meldung und keinem Protokoll auf.
+# passwort_datei = "~/.ahpt/webdav.passwort"
+# timeout        = 20
+
+# -- Ein zweiter PHP-Vermittler bei einem anderen Hoster ----------------
+#
+# Derselbe Weg wie [relay], nur woanders. Jeder PHP-Weg hat sein EIGENES
+# geheimnis_datei -- ein gemeinsames waere ein gemeinsamer Schaden.
+#
+# [[transport]]
+# art             = "php"
+# name            = "zweiter-hoster"
+# rolle           = "beide"
+# basis           = "https://example.org/ahpt"
+# geheimnis_datei = "~/.ahpt/geheimnis-zweiter-hoster"
+
+
+# ---------------------------------------------------------------- Dienste
+
+[[dienst]]
+name   = "dateien"
+art    = "datei"
+
+# Der Ordner, aus dem ausgeliefert wird. Wird beim Start aufgeloest und
+# geprueft; / und das Benutzerverzeichnis werden abgelehnt.
+#
+# Ordner darin legst du ganz normal an -- per SSH, Dateimanager, wie du
+# magst. Es gibt keinen Abgleich und keine zweite Liste: Der Agent zeigt,
+# was in dem Moment wirklich dasteht.
+wurzel = "/home/DEIN-NUTZER/ahpt-freigabe"
+
+aktionen  = ["liste", "hole"]
+max_bytes = 5242880
+
+# LEER LASSEN HEISST: alles geht hinaus, was die drei Pfadschranken
+# passiert. Mit Liste geht nur, was hier steht -- und der Client sagt beim
+# Auflisten, wie viele Dateien wegen ihrer Endung nicht gezeigt wurden.
+endungen = ["pdf", "txt", "md", "jpg", "png", "odt", "docx", "xlsx"]
