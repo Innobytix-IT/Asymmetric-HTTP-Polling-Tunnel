@@ -66,12 +66,36 @@ body::before {
 }
 header, main, #ablegezone, dialog { position: relative; z-index: 2; }
 
+/* Header und Fortschrittsblock haengen zusammen in EINEM feststehenden
+ * Block, statt einzeln sticky zu sein -- so bleibt der Fortschritt immer
+ * direkt unter dem Header sichtbar, egal wie hoch der Header gerade ist
+ * (er kann auf schmalen Bildschirmen umbrechen). Auf Wunsch vom
+ * 06.09.2026. */
+#kopfbereich { position: sticky; top: 0; z-index: 20; }
+
 header {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   padding: 14px 20px; background: var(--flaeche);
   border-bottom: 1px solid var(--rand-hell);
-  position: sticky; top: 0; z-index: 20;
 }
+.dropdown {
+  position: absolute; right: 0; top: calc(100% + 6px);
+  background: var(--flaeche-hoch); border: 1px solid var(--rand-hell);
+  border-radius: var(--radius); box-shadow: var(--schatten);
+  padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  min-width: 160px; z-index: 30;
+}
+/* Ohne diese Zeile sticht das "display: flex" oben das hidden-Attribut
+ * aus (beide gehoeren zur selben CSS-Herkunft, "display: flex" gewinnt
+ * einfach als das author-seitig gesetzte). Ergebnis waere ein Menue, das
+ * immer offen ist. Gefunden am 06.09.2026, direkt beim ersten Test. */
+.dropdown[hidden] { display: none; }
+.dropdown button { width: 100%; text-align: left; }
+#fortschritt {
+  background: var(--flaeche); border-bottom: 1px solid var(--rand-hell);
+  padding: 10px 20px;
+}
+#fortschritt-text { margin-bottom: 5px; }
 header h1 {
   font-size: 17px; margin: 0; font-weight: 700; letter-spacing: .4px;
   color: var(--akzent); text-shadow: var(--gluehen);
@@ -135,6 +159,12 @@ button.gefahr:hover:not(:disabled) {
   background: var(--warn-hell); border-color: var(--warn); color: var(--warn);
   box-shadow: 0 0 10px rgba(255,184,77,.35);
 }
+/* "Aktualisieren" und "Neuer Ordner" gleich breit -- 14ch fasst das
+ * laengere Wort ("Aktualisieren", 13 Zeichen) mit etwas Luft; bei der
+ * Monospace-Schrift ergibt das bei beiden exakt dieselbe Breite,
+ * unabhaengig vom Text. "Dateien hochladen" bleibt bewusst aussen vor.
+ * Auf Wunsch vom 06.09.2026. */
+.btn-gleich { min-width: 14ch; text-align: center; }
 
 input[type=text], input[type=password], textarea {
   font: inherit; font-size: 14px; width: 100%; padding: 8px 10px;
@@ -253,13 +283,33 @@ dialog::backdrop { background: rgba(0,0,0,.7); }
 
 <canvas id="matrix-hintergrund" aria-hidden="true"></canvas>
 
+<div id="kopfbereich">
 <header>
   <span class="punkt" id="punkt"></span>
   <h1 id="titel">AHPT Cloud</h1>
   <span id="zustand">wird geprueft …</span>
   <span class="luecke"></span>
-  <button id="btn-einrichten">Einrichtung</button>
+  <button id="btn-menu" title="Men&uuml;" aria-haspopup="true" aria-expanded="false">&hellip;</button>
+  <!-- Am Header verankert, nicht am Knopf: Bricht der Knopf bei schmalem
+       Fenster in eine eigene Zeile um, rutscht er nach LINKS (die
+       Luecke wirkt nur innerhalb derselben Zeile). Ein Menue, das sich
+       am Knopf ausrichtet, liefe dann links aus dem Bildschirm.
+       Am Header bleibt die Ecke immer die tatsaechliche rechte
+       Bildschirmkante. Gefunden und behoben am 06.09.2026. -->
+  <div id="menu-dropdown" class="dropdown" hidden>
+    <button id="btn-einrichten">Einrichtung</button>
+  </div>
 </header>
+
+<!-- Direkt unter dem Header, im selben feststehenden Block -- damit der
+     Fortschritt sichtbar bleibt, auch wenn man weit unten in einer langen
+     Dateiliste unterwegs ist. Vorher stand er zwischen Werkzeugleiste und
+     Liste und scrollte mit weg. Auf Wunsch vom 06.09.2026. -->
+<div id="fortschritt" hidden>
+  <div class="klein" id="fortschritt-text"></div>
+  <div class="balken"><i id="fortschritt-balken"></i></div>
+</div>
+</div>
 
 <main>
   <div id="meldungen"></div>
@@ -326,15 +376,10 @@ dialog::backdrop { background: rgba(0,0,0,.7); }
       <span class="luecke" style="flex:1"></span>
       <input type="text" id="feld-filter" placeholder="Filtern …"
              style="width:170px">
-      <button id="btn-aktualisieren" title="Neu laden">Aktualisieren</button>
-      <button id="btn-ordner">Neuer Ordner</button>
+      <button class="btn-gleich" id="btn-aktualisieren" title="Neu laden">Aktualisieren</button>
+      <button class="btn-gleich" id="btn-ordner">Neuer Ordner</button>
       <button class="haupt" id="btn-hoch">Dateien hochladen</button>
       <input type="file" id="feld-datei" multiple hidden>
-    </div>
-
-    <div id="fortschritt" hidden style="margin-bottom:14px">
-      <div class="klein" id="fortschritt-text" style="margin-bottom:5px"></div>
-      <div class="balken"><i id="fortschritt-balken"></i></div>
     </div>
 
     <div id="liste"></div>
@@ -498,6 +543,25 @@ function zeigeEinrichtung(an) {
 }
 
 $('#btn-einrichten').onclick = () => zeigeEinrichtung($('#karte-einrichtung').hidden);
+
+/* Das "..."-Menue: oeffnet/schliesst per Klick auf den Knopf, schliesst
+ * sich sonst bei jedem Klick anderswo auf der Seite -- auch nach einem
+ * Klick auf "Einrichtung" selbst, weil dessen Klick zum Dokument
+ * durchreicht. Auf Wunsch vom 06.09.2026. */
+{
+  const menuKnopf = $('#btn-menu');
+  const menu = $('#menu-dropdown');
+  menuKnopf.onclick = (e) => {
+    e.stopPropagation();
+    const offen = menu.hidden;
+    menu.hidden = !offen;
+    menuKnopf.setAttribute('aria-expanded', String(offen));
+  };
+  document.addEventListener('click', () => {
+    menu.hidden = true;
+    menuKnopf.setAttribute('aria-expanded', 'false');
+  });
+}
 
 /* Der Knopf sagt, was er tut -- und sieht anders aus, wenn es schon einen
    Schluessel gibt.
