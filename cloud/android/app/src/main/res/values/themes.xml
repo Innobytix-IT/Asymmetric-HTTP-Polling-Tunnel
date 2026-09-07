@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dunkel schon hier, nicht erst in Compose: Sonst blitzt beim Start
+         eine weisse Flaeche auf, bevor die erste Zeichnung steht. -->
+    <style name="Theme.Ahpt" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/grund</item>
+        <item name="android:statusBarColor">@color/flaeche</item>
+        <item name="android:navigationBarColor">@color/grund</item>
+    </style>
+</resources>

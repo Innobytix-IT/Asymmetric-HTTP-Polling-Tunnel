@@ -1,0 +1,6 @@
+# Der SDK-Pfad ist rechnergebunden und gehoert nicht ins Repository.
+local.properties
+.gradle/
+build/
+*.iml
+.idea/

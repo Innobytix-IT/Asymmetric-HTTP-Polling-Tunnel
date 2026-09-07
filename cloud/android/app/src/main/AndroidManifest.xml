@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+  Copyright (C) 2026 Manuel Person, InnoBytix-IT
+
+  usesCleartextTraffic: bplaced-frei liefert ueber https gar nicht den eigenen
+  Webspace aus (03.09.2026 gemessen, Port 443 zeigt eine fremde Standardseite).
+  Der Agent laesst http deshalb zu, sobald Noise laeuft. Fuer DIESE Seite ist
+  die Rechnung noch guenstiger als fuer ihn: Der Client schickt gar kein
+  Geheimnis mit. X-AHPT-Auth braucht nur, wer ANTWORTEN ablegen darf, also der
+  Agent. Ueber http liegt hier nichts offen ausser den Umstaenden (wann
+  gefragt wird, wie gross die Antwort war). Die Inhalte sind Ende zu Ende
+  verschluesselt.
+
+  Ein network_security_config mit Ausnahme fuer genau einen Wirt kommt nicht
+  in Frage: Die Adresse des Vermittlers gibt der Nutzer ein, sie steht beim
+  Bauen noch nicht fest.
+
+  Hinweis zur Schreibweise: Gedankenstriche stehen in dieser Datei als
+  Klammern oder Doppelpunkte, nicht als doppelter Bindestrich. XML verbietet
+  zwei Bindestriche im Kommentar, und der Bau bricht daran ab.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
+        android:theme="@style/Theme.Ahpt">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Ahpt">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dieselben Werte wie in Gestaltung.kt und portal/index.html. -->
+    <color name="grund">#070B08</color>
+    <color name="flaeche">#0C130D</color>
+    <color name="ic_launcher_background">#070B08</color>
+</resources>
