@@ -270,6 +270,16 @@ pruefe "unbekannte Protokollfassung abgewiesen" "$([ "$CODE" = "400" ] && echo 1
 besuch dateien liste '{}' 1 x25519
 pruefe "unbekanntes Verfahren abgewiesen" "$([ "$CODE" = "400" ] && echo 1 || echo 0)" "HTTP $CODE"
 
+# 5b -- Regression 05.09.2026: "v":1.0 ist zahlengleich mit der Fassung 1,
+#       nur anders typisiert. PHPs "!==" hielt das fuer eine falsche
+#       Fassung, bis genau das echte Stueck-Uploads scheitern liess. Der
+#       "besuch"-Helfer zwingt v ueber int() immer auf eine Ganzzahl, kann
+#       diesen Fall also nicht ausloesen -- deshalb hier ein roher Aufruf.
+C=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$U/relay.php?action=frage" \
+    -H 'Content-Type: application/json' \
+    --data '{"v":1.0,"krypto":"keine","nutzlast":{"dienst":"dateien","aktion":"liste","daten":{}}}')
+pruefe "zahlengleiche Fassung 1.0 wird angenommen" "$([ "$C" = "200" ] && echo 1 || echo 0)" "HTTP $C"
+
 # 6 -- Formfehler beim Dienstnamen
 for D in Dateien 'da.tei' 'a/b' ''; do
     besuch "$D" hole '{}'
