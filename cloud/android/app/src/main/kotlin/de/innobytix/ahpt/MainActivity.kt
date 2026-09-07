@@ -87,6 +87,13 @@ private fun Einrichtung(modell: Modell, kannZurueck: Boolean, fertig: () -> Unit
         ergebnis.contents?.let { modell.koppeln(it, android.os.Build.MODEL ?: "Handy") }
     }
 
+    // Der zweite Weg: die Verbindungsdatei des Assistenten. Sie braucht
+    // weder Kamera noch gemeinsames Netz -- sie kommt notfalls per USB-Kabel
+    // in den Download-Ordner. Dasselbe, was das Portal im Browser kann.
+    val dateiWaehler = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? -> uri?.let { modell.ladeVerbindungsdatei(it) } }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -104,6 +111,24 @@ private fun Einrichtung(modell: Modell, kannZurueck: Boolean, fertig: () -> Unit
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // Meldungen stehen OBEN. Vorher standen sie ganz unten vor dem
+            // Uebernehmen-Knopf -- wer eine falsche Datei laedt, muss dann
+            // erst scrollen, um zu erfahren warum nichts passiert ist.
+            z.meldung?.let { m ->
+                Surface(
+                    color = if (m.schlimm) MaterialTheme.colorScheme.errorContainer
+                    else MaterialTheme.colorScheme.secondaryContainer,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(m.text, Modifier.weight(1f),
+                             style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { modell.meldungWeg() }) { Text("OK") }
+                    }
+                }
+            }
+
             Card {
                 Column(
                     Modifier.padding(14.dp),
@@ -140,6 +165,27 @@ private fun Einrichtung(modell: Modell, kannZurueck: Boolean, fertig: () -> Unit
                                 "USB-Tethering einschalten.",
                         style = MaterialTheme.typography.bodySmall,
                     )
+
+                    HorizontalDivider()
+
+                    Text(
+                        "Ohne Kamera oder ohne gemeinsames Netz: die " +
+                                "Verbindungsdatei aus dem Assistenten laden. Sie darf " +
+                                "auch per USB-Kabel in den Download-Ordner gelegt " +
+                                "werden. Der eigene Schluessel muss dann von Hand zum " +
+                                "Agenten.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            dateiWaehler.launch(arrayOf("application/json", "*/*"))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.FileOpen, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Verbindungsdatei laden")
+                    }
                 }
             }
 
@@ -208,8 +254,6 @@ private fun Einrichtung(modell: Modell, kannZurueck: Boolean, fertig: () -> Unit
             }
 
             Spacer(Modifier.height(8.dp))
-
-            z.meldung?.let { Text(it.text, style = MaterialTheme.typography.bodySmall) }
 
             Button(
                 onClick = {

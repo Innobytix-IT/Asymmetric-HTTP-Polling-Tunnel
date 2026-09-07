@@ -140,6 +140,12 @@ class Modell(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) { was() }
             } catch (e: AhptFehler) {
                 melde(e.message ?: "Der Vorgang ist fehlgeschlagen.", schlimm = true)
+            } catch (e: AhptKopplungsFehler) {
+                // Eigene Klasse, weil die Kopplung nicht zum Protokoll gehoert
+                // -- aber genauso ein ERWARTETER Fall. Ohne diesen Zweig landet
+                // sie im Auffangnetz darunter und bekommt "Unerwartet:" davor,
+                // obwohl die Meldung genau sagt, was zu tun ist.
+                melde(e.message ?: "Die Kopplung ist fehlgeschlagen.", schlimm = true)
             } catch (e: Exception) {
                 melde("Unerwartet: ${e.message ?: e.javaClass.simpleName}", schlimm = true)
             } finally {
@@ -210,6 +216,31 @@ class Modell(app: Application) : AndroidViewModel(app) {
         val meine = ++ansichtNr
         zeigeListe("", meine)
         melde("Gekoppelt als \"$name\". Der Agent laesst dieses Geraet jetzt zu.")
+    }
+
+    /**
+     * Einrichten aus der Verbindungsdatei des Assistenten.
+     *
+     * Anders als beim Kopplungscode meldet sich das Geraet danach NICHT von
+     * selbst an -- die Datei traegt kein Token. Deshalb bleibt die
+     * Einrichtungsseite offen und die Meldung sagt, was noch fehlt, statt
+     * so zu tun, als sei man fertig.
+     */
+    fun ladeVerbindungsdatei(quelle: Uri) = vorgang {
+        val roh = getApplication<Application>().contentResolver
+            .openInputStream(quelle)?.use { it.readBytes().toString(Charsets.UTF_8) }
+            ?: throw AhptKopplungsFehler("Die Datei liess sich nicht oeffnen.")
+        val v = Verbindungsdatei.lies(roh)
+        speicher.basis = v.basis
+        speicher.agentHex = v.agentHex
+        if (!speicher.hatSchluessel) speicher.erzeugeNeuenSchluessel()
+        lieseEinrichtung()
+        melde(
+            "Adresse und Agentenschluessel uebernommen. Es fehlt noch der " +
+                    "Rueckweg: Der Schluessel dieses Geraets muss in die " +
+                    "clients-Liste des Agenten -- unten kopieren und im " +
+                    "Assistenten eintragen.",
+        )
     }
 
     fun hinein(ordner: String) =

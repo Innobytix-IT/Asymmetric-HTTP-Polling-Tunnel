@@ -88,6 +88,53 @@ data class Kopplungsdaten(
 class AhptKopplungsFehler(meldung: String) : Exception(meldung)
 
 /**
+ * Die Verbindungsdatei des Assistenten, wie das Portal sie auch liest.
+ *
+ * Derselbe Aufbau, dieselbe Pruefung -- absichtlich. Wer sie einmal
+ * heruntergeladen hat, soll sie fuer beide Wege benutzen koennen, ohne sich
+ * zu merken, welcher welche Fassung will.
+ *
+ * WOZU DAS NEBEN DEM QR-CODE
+ * ---------------------------
+ * Der QR-Code ist schneller, setzt aber eine Kamera UND ein gemeinsames Netz
+ * voraus. Beides fehlt oefter als man denkt: Geraete ohne Kamera, ein
+ * Firmennetz mit Client-Isolation, eine Firewall dazwischen. Die Datei
+ * braucht keins von beidem -- sie kommt notfalls per USB-Kabel auf das
+ * Geraet, denn ueber MTP sieht der Rechner den Download-Ordner des Handys.
+ *
+ * Der Preis: Sie traegt kein Token, also meldet sich das Geraet danach nicht
+ * von selbst beim Assistenten an. Der eigene oeffentliche Schluessel muss
+ * dann von Hand hinueber. Das ist kein Versehen -- eine Datei bleibt liegen,
+ * ein QR-Code auf dem Bildschirm nicht, und ein Token gehoert nicht in etwas,
+ * das im Download-Ordner vergessen wird.
+ */
+data class Verbindungsdatei(val basis: String, val agentHex: String) {
+    companion object {
+        fun lies(roh: String): Verbindungsdatei {
+            val o = try {
+                JSONObject(roh)
+            } catch (e: Exception) {
+                throw AhptKopplungsFehler("Diese Datei ist kein gueltiges JSON.")
+            }
+            // Form pruefen, nicht nur hoffen, dass sie stimmt: eine Datei mit
+            // falschem Inhalt soll eine klare Absage bekommen, kein stilles
+            // Falsch-Ausfuellen.
+            val basis = o.optString("basis")
+            val agent = o.optString("agent_oeffentlich").lowercase()
+            if (o.optString("typ") != "ahpt-verbindung" || basis.isEmpty()
+                || !Regex("[0-9a-f]{64}").matches(agent)
+            ) {
+                throw AhptKopplungsFehler(
+                    "Das ist keine Verbindungsdatei des Assistenten (falscher " +
+                            "Aufbau). Sie entsteht dort im Schritt \"Portal\".",
+                )
+            }
+            return Verbindungsdatei(basis.trimEnd('/'), agent)
+        }
+    }
+}
+
+/**
  * Den eigenen oeffentlichen Schluessel beim Assistenten anmelden.
  *
  * Probiert alle Adressen aus dem Code durch und nimmt die erste, die
