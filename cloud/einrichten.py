@@ -72,6 +72,7 @@ STANDDATEI = os.path.join(KONFIG_ORDNER, 'einrichten_stand.json')
 
 _schloss = threading.Lock()
 _token = None
+_port = 8771      # wird beim Start auf den tatsaechlichen Wert gesetzt
 _stand = {}
 
 
@@ -116,13 +117,31 @@ def eigene_adressen():
             s.close()
     except OSError:
         pass
-    # Doppelte raus, Reihenfolge halten.
+
+    # Der Trick oben findet nur die Adresse der Standardroute. Steckt das
+    # Handy per USB am Rechner und teilt seine Verbindung (USB-Tethering),
+    # entsteht eine ZWEITE Schnittstelle -- und ueber die kommt das Handy
+    # zurueck, nicht ueber die erste. Ohne sie in der Liste laeuft die
+    # Kopplung am Kabel ins Leere.
+    #
+    # Plattformuebergreifend und ohne Abhaengigkeit bleibt nur der Umweg
+    # ueber den eigenen Rechnernamen. Er findet nicht immer alles, aber die
+    # Tethering-Adresse taucht dort in aller Regel auf.
+    try:
+        for eintrag in socket.getaddrinfo(socket.gethostname(), None,
+                                          socket.AF_INET):
+            liste.append(eintrag[4][0])
+    except (OSError, socket.gaierror):
+        pass
+
+    # Doppelte raus, Reihenfolge halten. 127.0.0.1 nach hinten: Es traegt
+    # nur auf demselben Rechner, und wer koppelt, sitzt am anderen Geraet.
     gesehen = set()
     raus = []
     for a in liste:
         if a not in gesehen:
             gesehen.add(a); raus.append(a)
-    return raus
+    return [a for a in raus if a != '127.0.0.1'] +            (['127.0.0.1'] if '127.0.0.1' in gesehen else [])
 
 
 # ------------------------------------------------------------ Schritt-Logik
@@ -656,6 +675,122 @@ def schritt_geraet_hinzufuegen(daten):
     }
 
 
+# --------------------------------------------------------------- Kopplung
+#
+# Ein Geraet einzurichten hiess bisher: oeffentlichen Schluessel des Agenten
+# abtippen (64 Hexzeichen), Adresse abtippen, dann den Schluessel des Geraets
+# zurueck zum Server tragen. Dreimal Gelegenheit, sich zu vertippen.
+#
+# Der QR-Code nimmt die eine Richtung ab. Die andere -- der oeffentliche
+# Schluessel des Geraets muss zum Agenten -- geht NICHT per QR: Der Rechner
+# hat keine Kamera, die das Handy abliest. Deshalb steht im Code auch die
+# Adresse dieses Assistenten samt Token, und das Geraet meldet sich von
+# selbst zurueck. Beide sind im selben Netz, ob ueber WLAN oder ueber ein
+# USB-Kabel mit eingeschaltetem Tethering.
+#
+# WAS UEBER DEN QR-CODE GEHT, UND WAS NICHT
+# ------------------------------------------
+# Nur Oeffentliches: die Adresse des Vermittlers, der oeffentliche
+# Schluessel des Agenten, die Adressen dieses Assistenten, das Zugangs-Token.
+# Der PRIVATE Schluessel des Geraets entsteht auf dem Geraet und verlaesst es
+# nie -- daran aendert die Kopplung nichts.
+#
+# Das Token ist der einzige Wert im Code, der schuetzenswert ist. Es lebt nur
+# so lange wie dieser Assistent und gilt nur im eigenen Netz. Wer es
+# abfotografiert, kann ein Geraet zulassen -- deshalb sollte man den Code
+# nicht herumzeigen und den Assistenten beenden, wenn man fertig ist.
+
+_zuletzt_gekoppelt = None
+
+
+def _aus_agent_konfig():
+    """Adresse und oeffentlichen Schluessel aus der LAUFENDEN Konfiguration.
+
+    Der Stand des Assistenten ist nur sein eigener Zwischenspeicher. Wer den
+    Agenten von Hand eingerichtet hat -- und das war bei diesem Projekt der
+    Normalfall, bevor es den Assistenten gab --, hat dort nichts stehen. Die
+    Wahrheit liegt in agent_privat.toml, und von dort kommt sie hier.
+    """
+    pfad = os.path.join(KONFIG_ORDNER, 'agent_privat.toml')
+    if not os.path.isfile(pfad):
+        return {}
+    try:
+        import tomllib
+        with open(pfad, 'rb') as f:
+            d = tomllib.load(f)
+    except Exception:
+        return {}
+    raus = {}
+    basis = (d.get('relay') or {}).get('basis')
+    if basis:
+        raus['basis'] = str(basis)
+    sd = (d.get('krypto') or {}).get('schluessel')
+    if sd:
+        try:
+            import krypto
+            priv = krypto.lies_privat(os.path.expanduser(str(sd)))
+            raus['agent'] = krypto._oeffentlich(priv).hex()
+        except Exception:
+            pass
+    return raus
+
+
+def kopplungsdaten():
+    """Was in den QR-Code gehoert. Kurze Schluesselnamen, damit der Code
+    klein bleibt: Jedes Zeichen kostet Flaeche, und ein grosser Code ist
+    schwerer zu treffen."""
+    with _schloss:
+        basis = _stand.get('webspace')
+        agent = _stand.get('agent_oeffentlich')
+    if not basis or not agent:
+        aus = _aus_agent_konfig()
+        basis = basis or aus.get('basis')
+        agent = agent or aus.get('agent')
+    if not basis:
+        raise EinrichtenFehler(
+            'Die Adresse des Vermittlers steht weder im Stand des Assistenten '
+            'noch in agent_privat.toml. Entweder den Schritt "Webspace" '
+            'durchlaufen oder [relay] basis in der Konfiguration setzen.')
+    if not agent:
+        raise EinrichtenFehler(
+            'Der oeffentliche Schluessel des Agenten liess sich nicht '
+            'ermitteln -- weder aus dem Stand des Assistenten noch aus der '
+            'Schluesseldatei, die [krypto] schluessel in agent_privat.toml '
+            'nennt. Laeuft der Agent ueberhaupt schon?')
+    return {
+        'b': _adresse_normalisieren(basis),
+        'a': agent,
+        't': _token,
+        'h': ['%s:%d' % (a, _port) for a in eigene_adressen()],
+    }
+
+
+def schritt_koppeln(daten):
+    """Nimmt den oeffentlichen Schluessel eines Geraets entgegen.
+
+    Ruft dieselbe Funktion wie der Handeintrag -- das ist Absicht. Der Weg
+    ueber den QR-Code ist bequemer, aber er darf nicht LOCKERER sein: Was
+    hier ankommt, durchlaeuft dieselbe Pruefung und landet in derselben
+    Zeile derselben Datei.
+    """
+    global _zuletzt_gekoppelt
+    name = str(daten.get('geraet') or 'Unbenanntes Geraet')[:60]
+    # Nur Zeichen, die man gefahrlos anzeigen kann. Der Name kommt vom
+    # Geraet, also von aussen -- er wird nur gezeigt, nie ausgefuehrt oder
+    # in eine Datei geschrieben, aber Steuerzeichen in einer Konsolenzeile
+    # sind trotzdem unschoen.
+    name = ''.join(c for c in name if c.isprintable())
+    ergebnis = schritt_geraet_hinzufuegen(daten)
+    _zuletzt_gekoppelt = {
+        'geraet': name,
+        'war_schon_da': ergebnis.get('war_schon_da', False),
+        'anzahl_geraete': ergebnis.get('anzahl_geraete'),
+        'zeit': time.time(),
+    }
+    return {'ok': True, 'geraet': name,
+            'war_schon_da': ergebnis.get('war_schon_da', False)}
+
+
 def _konfig_bauen(webspace, geheimnis_datei, agent_key, freigabe):
     """Baut den TOML-Text von Hand -- weniger Aufwand als tomli_w als
     Abhaengigkeit dazuzunehmen."""
@@ -751,14 +886,24 @@ def _log_ende(log_datei, zeilen):
 
 class Auslieferer(BaseHTTPRequestHandler):
     def _autorisiert(self):
-        # Token aus Cookie ODER Query.
-        cookie = self.headers.get('Cookie', '')
-        m = re.search(r'(?:^|;\s*)at=([0-9a-f]+)', cookie)
-        wenn_da = m.group(1) if m else None
-        if not wenn_da:
-            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            wenn_da = (q.get('t') or [None])[0]
-        return wenn_da and secrets.compare_digest(wenn_da, _token)
+        """Token aus Cookie ODER Query -- und zwar BEIDE pruefen.
+
+        Frueher gewann der Cookie: War einer da, wurde die Query gar nicht
+        mehr angesehen. Das faellt genau dann auf die Fuesse, wenn man den
+        Assistenten neu startet und den Browser offen laesst -- der alte
+        Cookie traegt dann ein Token, das es nicht mehr gibt, und die
+        frische URL mit dem richtigen Token kommt nicht durch. Der Nutzer
+        sieht "Zugangs-Token fehlt", obwohl er es gerade eingegeben hat.
+        Am 07.09.2026 beim Koppeln aufgefallen.
+        """
+        kandidaten = []
+        m = re.search(r'(?:^|;\s*)at=([0-9a-f]+)', self.headers.get('Cookie', ''))
+        if m:
+            kandidaten.append(m.group(1))
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        if q.get('t'):
+            kandidaten.append(q['t'][0])
+        return any(secrets.compare_digest(k, _token) for k in kandidaten)
 
     def log_message(self, *_a): pass  # keine Konsolenzeile je Anfrage
 
@@ -779,7 +924,11 @@ class Auslieferer(BaseHTTPRequestHandler):
         # Anmelden per Token in der URL -> Cookie setzen und ohne Token
         # weiterschicken.
         q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-        if 't' in q:
+        # Nur die SEITE bekommt den Cookie-Umweg. Ein Abruf unter /api/ oder
+        # /kopplung.svg soll direkt antworten: Das Handy holt sich diese
+        # Adressen beim Koppeln, und es folgt keiner Umleitung, um sich
+        # einen Cookie abzuholen, den es nachher nicht braucht.
+        if 't' in q and not pfad.startswith('/api/') and pfad != '/kopplung.svg':
             t = q['t'][0]
             if secrets.compare_digest(t, _token):
                 cookie = 'at=%s; Path=/; HttpOnly; SameSite=Strict' % _token
@@ -798,6 +947,30 @@ class Auslieferer(BaseHTTPRequestHandler):
         if pfad == '/api/stand':
             return self._antwort(200, 'application/json; charset=utf-8',
                                  json.dumps({'stand': _stand}))
+        if pfad == '/api/kopplung':
+            try:
+                return self._antwort(200, 'application/json; charset=utf-8',
+                                     json.dumps(kopplungsdaten()))
+            except EinrichtenFehler as e:
+                return self._antwort(400, 'application/json; charset=utf-8',
+                                     json.dumps({'fehler': str(e)}))
+        if pfad == '/kopplung.svg':
+            try:
+                import qr
+                daten = json.dumps(kopplungsdaten(), separators=(',', ':'))
+                return self._antwort(200, 'image/svg+xml; charset=utf-8',
+                                     qr.svg(daten, 'M', punkt=6))
+            except EinrichtenFehler as e:
+                return self._antwort(400, 'text/plain; charset=utf-8', str(e))
+            except Exception as e:
+                return self._antwort(500, 'text/plain; charset=utf-8',
+                                     'QR-Code fehlgeschlagen: %s' % e)
+        if pfad == '/api/gekoppelt':
+            # Die Seite fragt das im Takt ab, waehrend der Code auf dem
+            # Bildschirm steht. Sobald sich ein Geraet gemeldet hat, steht
+            # es hier -- der Nutzer muss nichts anklicken.
+            return self._antwort(200, 'application/json; charset=utf-8',
+                                 json.dumps({'zuletzt': _zuletzt_gekoppelt}))
         if pfad == '/api/pruefen':
             try:
                 return self._antwort(200, 'application/json; charset=utf-8',
@@ -831,6 +1004,7 @@ class Auslieferer(BaseHTTPRequestHandler):
             '/api/konfig':     schritt_konfig,
             '/api/agent':      schritt_agent,
             '/api/geraet_hinzufuegen': schritt_geraet_hinzufuegen,
+            '/api/koppeln':    schritt_koppeln,
         }.get(pfad)
         if aktion is None:
             return self._antwort(404, 'text/plain; charset=utf-8',
@@ -1437,10 +1611,43 @@ function zeigeFertig() {
 function zeigeGeraetHinzufuegen() {
   zeig(huelle(
     '<h2>Weiteres Ger&auml;t hinzuf&uuml;gen</h2>'
-    + '<p>Auf dem neuen Ger&auml;t zuerst <code>ahpt-portal-lokal.html</code> '
-    + '&ouml;ffnen und &bdquo;Schl&uuml;ssel erzeugen&ldquo; dr&uuml;cken. '
-    + 'Den dort angezeigten &ouml;ffentlichen Schl&uuml;ssel (64 Hex-Zeichen) '
-    + 'hier eintragen:</p>'
+
+    + '<p>Zur Cloud f&uuml;hren zwei gleichwertige Wege: die App auf dem '
+    + 'Handy oder das Portal im Browser. Beide brauchen dasselbe &ndash; die '
+    + 'Adresse des Vermittlers und den Schl&uuml;ssel des Agenten &ndash;, und '
+    + 'von beiden muss der eigene &ouml;ffentliche Schl&uuml;ssel hierher '
+    + 'zur&uuml;ck. Nur der WEG dorthin unterscheidet sich.</p>'
+
+    + '<h3>Die App: abfotografieren</h3>'
+    + '<p>In der AHPT-App auf &bdquo;Code abfotografieren&ldquo; tippen. Die '
+    + 'App richtet sich selbst ein und meldet sich hier zur&uuml;ck &ndash; '
+    + 'nichts abzutippen, in keiner Richtung.</p>'
+    + '<div id="qrOrt" style="text-align:center;margin:14px 0">'
+    + '<img src="/kopplung.svg" alt="Kopplungscode" '
+    + 'style="width:260px;height:260px;image-rendering:pixelated;'
+    + 'background:#fff;padding:8px;border-radius:4px" '
+    + 'onerror="qrFehlt()"></div>'
+    + '<div id="qrWarten">' + meldung('Warte auf das Ger&auml;t &hellip;', 'warn')
+    + '</div>'
+    + warum('Was steht in dem Code?',
+        'Nur &Ouml;ffentliches: die Adresse des Vermittlers, der '
+      + '&ouml;ffentliche Schl&uuml;ssel des Agenten, die Adressen dieses '
+      + 'Assistenten und sein Zugangs-Token. Der PRIVATE Schl&uuml;ssel des '
+      + 'Handys entsteht dort und verl&auml;sst es nie. '
+      + 'Das Token ist der einzige schutzw&uuml;rdige Wert darin: Es lebt nur '
+      + 'so lange wie dieser Assistent und gilt nur im eigenen Netz &ndash; '
+      + 'aber wer den Code abfotografiert, kann ein Ger&auml;t zulassen. '
+      + 'Also nicht herumzeigen und den Assistenten beenden, wenn du fertig '
+      + 'bist. '
+      + 'Kein WLAN zur Hand? Handy per USB anschlie&szlig;en und dort '
+      + 'USB-Tethering einschalten &ndash; die Adressen im Code decken beides ab.')
+
+    + '<h3 style="margin-top:22px">Das Portal: Schl&uuml;ssel eintragen</h3>'
+    + '<p>Das Portal l&auml;uft im Browser und liest keine QR-Codes. Daf&uuml;r '
+    + 'braucht es auch keine Kamera: Die Verbindungsdatei bekommst du im '
+    + 'Schritt &bdquo;Portal&ldquo;, und den Schl&uuml;ssel, den das Portal '
+    + 'beim ersten &Ouml;ffnen erzeugt, tr&auml;gst du hier ein. Derselbe Weg '
+    + 'gilt, wenn die Kamera eines Handys nicht mitspielt.</p>'
     + '<label>&Ouml;ffentlicher Schl&uuml;ssel des neuen Ger&auml;ts</label>'
     + '<input type="text" id="fNeuesGeraet" placeholder="64 Hexzeichen">'
     + '<div id="geraetErgebnis"></div>',
@@ -1448,6 +1655,43 @@ function zeigeGeraetHinzufuegen() {
     '<button class="haupt" id="knopfGeraet" onclick="tuGeraetHinzufuegen()">'
     + 'Hinzuf&uuml;gen</button>'
   ));
+  wartAufGeraet();
+}
+
+function qrFehlt() {
+  $('#qrOrt').innerHTML = meldung(
+    'Der Kopplungscode l&auml;sst sich nicht erzeugen. Meist fehlt noch die '
+    + 'Adresse des Vermittlers oder der Schl&uuml;ssel des Agenten &ndash; '
+    + 'dann zuerst die Einrichtung zu Ende f&uuml;hren. Der Weg &uuml;ber '
+    + 'das Eintragen unten funktioniert unabh&auml;ngig davon.', 'warn');
+  $('#qrWarten').innerHTML = '';
+}
+
+/* Auf die Rueckmeldung des Handys warten.
+ *
+ * Das Intervall haelt sich selbst an, sobald sein Anzeigeort nicht mehr im
+ * Dokument steht -- so muss keine andere Stelle daran denken, es zu
+ * beenden, wenn der Nutzer weiterklickt. */
+let geraetSeit = 0;
+function wartAufGeraet() {
+  geraetSeit = Date.now() / 1000;
+  const takt = setInterval(async () => {
+    const ort = document.getElementById('qrWarten');
+    if (!ort) { clearInterval(takt); return; }
+    try {
+      const d = await jsonAn('/api/gekoppelt');
+      const z = d.zuletzt;
+      if (z && z.zeit > geraetSeit) {
+        clearInterval(takt);
+        ort.innerHTML = meldung(
+          '<b>' + (z.geraet || 'Ger&auml;t').replace(/[<>&]/g, c => (
+            {'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</b> '
+          + (z.war_schon_da ? 'war schon zugelassen.' : 'ist jetzt zugelassen.')
+          + ' Der Agent l&auml;uft mit ' + z.anzahl_geraete
+          + ' Ger&auml;t(en).', 'gut');
+      }
+    } catch (e) { /* Ein Aussetzer beim Abfragen ist kein Grund aufzuhoeren. */ }
+  }, 1500);
 }
 
 async function tuGeraetHinzufuegen() {
@@ -1499,7 +1743,7 @@ async function tuGeraetHinzufuegen() {
 # --------------------------------------------------------------- main
 
 def main():
-    global _token, _stand
+    global _token, _stand, _port
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=8771)
     ap.add_argument('--nur-localhost', action='store_true',
@@ -1507,6 +1751,7 @@ def main():
     a = ap.parse_args()
 
     _token = secrets.token_hex(16)
+    _port = a.port
     _stand = stand_lesen()
 
     binden = '127.0.0.1' if a.nur_localhost else '0.0.0.0'

@@ -25,6 +25,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Nur fuer das Abfotografieren des Kopplungscodes. Die App nimmt
+         keine Bilder auf und speichert nichts; der Scanner laeuft genau so
+         lange, wie der Code gelesen wird. Als optional erklaert, damit
+         Geraete ohne Kamera die App trotzdem installieren koennen: Der Weg
+         von Hand funktioniert dort weiterhin. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"

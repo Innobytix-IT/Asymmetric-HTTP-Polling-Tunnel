@@ -19,6 +19,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,6 +35,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import de.innobytix.ahpt.kern.Fortschritt
 
 class MainActivity : ComponentActivity() {
@@ -66,14 +70,22 @@ private fun Rahmen(modell: Modell = viewModel()) {
 @Composable
 private fun Einrichtung(modell: Modell, kannZurueck: Boolean, fertig: () -> Unit) {
     val ctx = LocalContext.current
-    val s = modell.speicher
-    var basis by remember { mutableStateOf(s.basis) }
-    var agent by remember { mutableStateOf(s.agentHex) }
-    var eigener by remember {
-        mutableStateOf(runCatching { s.eigenerOeffentlicherHex() }.getOrDefault(""))
-    }
-    var frageNeuerSchluessel by remember { mutableStateOf(false) }
     val z by modell.zustand.collectAsState()
+    // Die Felder muessen tippbar bleiben, sollen aber nachziehen, wenn sich
+    // der gespeicherte Wert aendert -- etwa nach einem Kopplungsvorgang.
+    // Deshalb der Zustandswert als Schluessel: Aendert er sich, faengt das
+    // Feld mit dem neuen Wert neu an.
+    var basis by remember(z.basis) { mutableStateOf(z.basis) }
+    var agent by remember(z.agentHex) { mutableStateOf(z.agentHex) }
+    val eigener = z.eigenerHex
+    var frageNeuerSchluessel by remember { mutableStateOf(false) }
+
+    // Der Scanner kommt von ZXing und bringt seine eigene Ansicht mit, samt
+    // Nachfrage nach der Kamera-Erlaubnis. `contents` ist null, wenn der
+    // Nutzer abbricht -- das ist kein Fehler und wird still uebergangen.
+    val scanner = rememberLauncherForActivityResult(ScanContract()) { ergebnis ->
+        ergebnis.contents?.let { modell.koppeln(it, android.os.Build.MODEL ?: "Handy") }
+    }
 
     Scaffold(
         topBar = {
@@ -88,9 +100,52 @@ private fun Einrichtung(modell: Modell, kannZurueck: Boolean, fertig: () -> Unit
         },
     ) { pad ->
         Column(
-            Modifier.padding(pad).padding(16.dp).fillMaxSize(),
+            Modifier.padding(pad).padding(16.dp).fillMaxSize()
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            Card {
+                Column(
+                    Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Schnellster Weg: koppeln",
+                         style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Auf dem Rechner den Einrichtungs-Assistenten oeffnen, " +
+                                "dort \"Weiteres Geraet hinzufuegen\" waehlen und den " +
+                                "angezeigten Code abfotografieren. Adresse und " +
+                                "Schluessel kommen dann von selbst, und dieses Geraet " +
+                                "meldet sich beim Agenten an.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(
+                        onClick = {
+                            scanner.launch(ScanOptions().apply {
+                                setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                setPrompt("Kopplungscode des Assistenten abfotografieren")
+                                setBeepEnabled(false)
+                                setOrientationLocked(false)
+                            })
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.QrCodeScanner, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Code abfotografieren")
+                    }
+                    Text(
+                        "Beide Geraete muessen dafuer im selben Netz sein -- gleiches " +
+                                "WLAN, oder Handy per USB anschliessen und dort " +
+                                "USB-Tethering einschalten.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            HorizontalDivider()
+            Text("Oder von Hand", style = MaterialTheme.typography.titleMedium)
+
             OutlinedTextField(
                 value = basis, onValueChange = { basis = it },
                 label = { Text("Adresse des Vermittlers") },
@@ -122,7 +177,7 @@ private fun Einrichtung(modell: Modell, kannZurueck: Boolean, fertig: () -> Unit
                             "Android-Schluesselspeicher.",
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Button(onClick = { eigener = s.erzeugeNeuenSchluessel() }) {
+                Button(onClick = { modell.erzeugeSchluessel() }) {
                     Text("Schluessel erzeugen")
                 }
             } else {
@@ -152,16 +207,14 @@ private fun Einrichtung(modell: Modell, kannZurueck: Boolean, fertig: () -> Unit
                 )
             }
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(8.dp))
 
             z.meldung?.let { Text(it.text, style = MaterialTheme.typography.bodySmall) }
 
             Button(
                 onClick = {
-                    s.basis = basis
-                    s.agentHex = agent
-                    modell.pruefeEinrichtung()
-                    if (s.eingerichtet) { modell.lade(""); fertig() }
+                    modell.uebernimm(basis, agent)
+                    if (modell.speicher.eingerichtet) { modell.lade(""); fertig() }
                     else modell.melde(
                         "Es fehlt noch etwas: Adresse, Agentenschluessel oder " +
                                 "der eigene Schluessel.", schlimm = true,
@@ -186,7 +239,7 @@ private fun Einrichtung(modell: Modell, kannZurueck: Boolean, fertig: () -> Unit
             },
             confirmButton = {
                 TextButton(onClick = {
-                    eigener = s.erzeugeNeuenSchluessel()
+                    modell.erzeugeSchluessel()
                     frageNeuerSchluessel = false
                 }) { Text("Erzeugen") }
             },

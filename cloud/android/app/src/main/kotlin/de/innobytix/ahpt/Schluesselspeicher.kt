@@ -108,7 +108,18 @@ class Schluesselspeicher(context: Context) {
     /* ------------------------------------------------- Nach aussen */
 
     val eingerichtet: Boolean
-        get() = e.contains(S_PRIVAT) && basis.isNotEmpty() && agentHex.isNotEmpty()
+        get() = hatSchluessel && basis.isNotEmpty() && agentHex.isNotEmpty()
+
+    /**
+     * Gibt es schon ein Schluesselpaar?
+     *
+     * Beim Koppeln wird genau danach gefragt, bevor ein neues erzeugt wird:
+     * Ein zweites Mal erzeugen macht die bisherige Paarung still ungueltig,
+     * und der Agent wuerde die App danach abweisen, ohne dass jemand wuesste
+     * warum.
+     */
+    val hatSchluessel: Boolean
+        get() = e.contains(S_PRIVAT)
 
     var basis: String
         get() = e.getString(S_BASIS, "") ?: ""

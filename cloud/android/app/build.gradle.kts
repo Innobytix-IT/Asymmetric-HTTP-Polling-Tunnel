@@ -66,6 +66,16 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
 
+    // QR-Codes lesen, fuer die Kopplung mit dem Einrichtungs-Assistenten.
+    //
+    // ZXing und NICHT Googles ML Kit: Letzteres ist unfrei und zieht die
+    // Play-Dienste nach. Diese App steht unter der AGPL und soll ohne
+    // Google-Dienste laufen koennen -- sonst faellt der Weg ueber F-Droid
+    // aus, und der ist gerade fuer dieses Projekt der passende: Dort wird
+    // aus dem Quelltext gebaut, was belegt, dass die App wirklich dem
+    // Repository entspricht.
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+
     // Hochladen laeuft weiter, wenn die App in den Hintergrund geht. Genau
     // dafuer lohnt sich eine App gegenueber dem Portal: 4 MiB brauchen ueber
     // bplaced rund dreieinhalb Minuten, und so lange muss niemand das Telefon

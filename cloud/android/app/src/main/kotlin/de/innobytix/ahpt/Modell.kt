@@ -46,6 +46,16 @@ data class Zustand(
     val fortschritt: Fortschritt? = null,
     /** Hinweise des Handlers, warum die Liste kuerzer sein kann als der Ordner. */
     val hinweis: String? = null,
+    /* Die Einrichtungswerte stehen HIER und nicht nur im Speicher.
+     *
+     * Vorher las die Einrichtungsseite sie einmal beim Aufbau in ein
+     * `remember` -- und zeigte danach unveraendert weiter, was beim Aufbau
+     * galt. Nach einem Kopplungsvorgang stand dort "noch kein Schluessel",
+     * obwohl gerade einer erzeugt worden war. Am 07.09.2026 beim ersten
+     * Scan auf echter Hardware aufgefallen. */
+    val basis: String = "",
+    val agentHex: String = "",
+    val eigenerHex: String = "",
 )
 
 class Modell(app: Application) : AndroidViewModel(app) {
@@ -77,8 +87,35 @@ class Modell(app: Application) : AndroidViewModel(app) {
         agent = speicher.agent(),
     )
 
-    fun pruefeEinrichtung() {
-        _zustand.update { it.copy(eingerichtet = speicher.eingerichtet) }
+    init {
+        lieseEinrichtung()
+    }
+
+    fun pruefeEinrichtung() = lieseEinrichtung()
+
+    /** Den angezeigten Zustand mit dem Speicher gleichziehen. */
+    fun lieseEinrichtung() {
+        val eigener = runCatching { speicher.eigenerOeffentlicherHex() }.getOrDefault("")
+        _zustand.update {
+            it.copy(
+                eingerichtet = speicher.eingerichtet,
+                basis = speicher.basis,
+                agentHex = speicher.agentHex,
+                eigenerHex = eigener,
+            )
+        }
+    }
+
+    /** Adresse und Agentenschluessel von Hand uebernehmen. */
+    fun uebernimm(basis: String, agentHex: String) {
+        speicher.basis = basis
+        speicher.agentHex = agentHex
+        lieseEinrichtung()
+    }
+
+    fun erzeugeSchluessel() {
+        speicher.erzeugeNeuenSchluessel()
+        lieseEinrichtung()
     }
 
     fun melde(text: String, schlimm: Boolean = false) {
@@ -148,6 +185,31 @@ class Modell(app: Application) : AndroidViewModel(app) {
                 hinweis = hinweise.takeIf { h -> h.isNotEmpty() }?.joinToString(", "),
             )
         }
+    }
+
+    /**
+     * Einrichten aus einem Kopplungscode.
+     *
+     * Reihenfolge ist wichtig: erst die Adresse und der Agentenschluessel,
+     * dann der eigene Schluessel, DANN die Rueckmeldung. Wer sich anmeldet,
+     * bevor er weiss wohin, hat einen Schluessel beim Agenten liegen, der zu
+     * nichts gehoert.
+     */
+    fun koppeln(rohQr: String, geraetename: String) = vorgang {
+        val d = Kopplungsdaten.lies(rohQr)
+        speicher.basis = d.basis
+        speicher.agentHex = d.agentHex
+        if (!speicher.hatSchluessel) speicher.erzeugeNeuenSchluessel()
+        // Vor der Rueckmeldung nachziehen: Schlaegt die fehl, hat der Nutzer
+        // trotzdem schon Adresse, Agentenschluessel und seinen eigenen
+        // Schluessel vor sich -- und kann von Hand weitermachen, statt vor
+        // einer Seite zu stehen, die so aussieht, als sei nichts passiert.
+        lieseEinrichtung()
+        val name = meldeBeimAssistenten(d, speicher.eigenerOeffentlicherHex(), geraetename)
+        lieseEinrichtung()
+        val meine = ++ansichtNr
+        zeigeListe("", meine)
+        melde("Gekoppelt als \"$name\". Der Agent laesst dieses Geraet jetzt zu.")
     }
 
     fun hinein(ordner: String) =
