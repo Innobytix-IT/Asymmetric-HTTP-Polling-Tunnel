@@ -250,7 +250,10 @@ pruefe "Ablage angelegt und beschreibbar" \
 #
 #   403  das Geheimnis passt NICHT
 #   400  das Geheimnis passt, die Frage war nur absichtlich unsinnig
-ANTW=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASIS/relay.php?action=antwort"        -H 'Content-Type: application/json'        -H "X-AHPT-Auth: $(cat "$Q/relay_token.php" | tail -1)"        --data '{"v":1,"krypto":"keine","marke":"00000000000000000000000000000000","teile":1,"nutzlast":{}}')
+ANTW=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASIS/relay.php?action=antwort" \
+       -H 'Content-Type: application/json' \
+       -H "X-AHPT-Auth: $(tail -1 "$QUELLE/relay_token.php")" \
+       --data '{"v":1,"krypto":"keine","marke":"00000000000000000000000000000000","teile":1,"nutzlast":{}}')
 if [ "$ANTW" = "403" ]; then
     pruefe "Geheimnis stimmt ueberein" 0 "Vermittler weist es ab (403)"
 elif [ "$ANTW" = "000" ]; then
