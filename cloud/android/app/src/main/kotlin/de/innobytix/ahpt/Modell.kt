@@ -18,7 +18,9 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.innobytix.ahpt.kern.AhptClient
+import de.innobytix.ahpt.kern.BLOCK
 import de.innobytix.ahpt.kern.AhptFehler
+import de.innobytix.ahpt.kern.Fehlerart
 import de.innobytix.ahpt.kern.Fortschritt
 import de.innobytix.ahpt.kern.Quelle
 import de.innobytix.ahpt.kern.hole
@@ -35,7 +37,72 @@ import java.io.InputStream
 
 data class Eintrag(val name: String, val istOrdner: Boolean, val bytes: Long?)
 
-data class Meldung(val text: String, val schlimm: Boolean = false)
+data class Meldung(
+    val text: String,
+    val schlimm: Boolean = false,
+    /** Wenn gesetzt: Die Meldung bietet an, diese Datei zu oeffnen. */
+    val oeffnen: Uri? = null,
+    val oeffnenName: String = "",
+)
+
+/**
+ * Eine laufende Uebertragung -- alles, was der Bildschirm darueber sagen soll.
+ *
+ * WARUM DAS NEBEN `fortschritt` STEHT UND IHN NICHT ERSETZT
+ * ----------------------------------------------------------
+ * Der Kern meldet EINEN Fortschritt, und der wechselt die Bedeutung: Erst
+ * `Summe` (Pruefsumme der eigenen Datei), dann `Hoch` (Block soundso), und
+ * zwischendurch `Warten` (der Agent hat noch nicht geantwortet). Wer nur den
+ * letzten Wert anzeigt, verliert bei jedem `Warten` die Blockzahl -- der
+ * Balken springt dann auf unbestimmt zurueck.
+ *
+ * Hier bleibt deshalb BEIDES stehen: der Stand in Bytes, der nur waechst,
+ * und daneben die Phase, die sich aendern darf.
+ */
+data class Transfer(
+    val hinauf: Boolean,
+    val name: String,
+    val phase: String,
+    val getan: Long = 0,
+    val gesamt: Long = 0,
+    /** Als der erste Fortschritt kam -- nicht als der Vorgang begann. */
+    val gemessenAb: Long = 0,
+    val gemessenAbBytes: Long = 0,
+    val jetzt: Long = 0,
+    /**
+     * Was durch ABGESCHLOSSENE Bloecke schon sicher steht.
+     *
+     * Die Stueckmeldungen beziehen sich immer auf den laufenden Block, nie
+     * auf die ganze Datei. Ohne diesen Bezugspunkt muesste man sie entweder
+     * ignorieren -- dann steht der Balken bei einer 4-MiB-Datei minutenlang
+     * still -- oder auf das Ganze beziehen, und dann springt er bei jedem
+     * Blockwechsel zurueck. Mit ihm gehen beide zusammen.
+     */
+    val basis: Long = 0,
+) {
+    val anteil: Float? get() = if (gesamt > 0) (getan.toFloat() / gesamt) else null
+
+    /**
+     * Geschaetzte Restzeit in Sekunden, oder null.
+     *
+     * Gemessen wird ab dem ERSTEN Fortschritt, nicht ab dem Start: Davor
+     * liegen Handschlag und Pruefsumme, und die verzerren die Rate so stark,
+     * dass die erste Schaetzung sonst um ein Vielfaches danebenliegt.
+     *
+     * Erst ab einer Sekunde und ab 1 % -- vorher ist jede Hochrechnung
+     * geraten, und eine Zahl, die von 40 Minuten auf 20 Sekunden springt,
+     * ist schlechter als keine.
+     */
+    val restSekunden: Long?
+        get() {
+            val dauer = (jetzt - gemessenAb) / 1000.0
+            val bytes = getan - gemessenAbBytes
+            if (gesamt <= 0 || dauer < 1.0 || bytes <= 0) return null
+            if (getan.toDouble() / gesamt < 0.01) return null
+            val rate = bytes / dauer
+            return ((gesamt - getan) / rate).toLong().coerceAtMost(99 * 3600)
+        }
+}
 
 data class Zustand(
     val eingerichtet: Boolean = false,
@@ -44,6 +111,17 @@ data class Zustand(
     val laedt: Boolean = false,
     val meldung: Meldung? = null,
     val fortschritt: Fortschritt? = null,
+    /** Laeuft gerade eine Uebertragung? Dann zeigt die App einen Dialog. */
+    val transfer: Transfer? = null,
+    /* Eine Datei liegt bereit und soll SOFORT angezeigt werden.
+     *
+     * Das Modell kann keine fremde Anzeige starten -- dafuer braucht es
+     * einen Zusammenhang, und der gehoert der Oberflaeche. Also legt es die
+     * Adresse hier ab, die Oberflaeche sieht sie, oeffnet, und meldet sich
+     * mit `oeffnenErledigt()` zurueck. Ohne das Zuruecksetzen oeffnete sich
+     * die Datei bei jedem Neuzeichnen wieder. */
+    val oeffneJetzt: Uri? = null,
+    val oeffneName: String = "",
     /** Hinweise des Handlers, warum die Liste kuerzer sein kann als der Ordner. */
     val hinweis: String? = null,
     /* Die Einrichtungswerte stehen HIER und nicht nur im Speicher.
@@ -118,13 +196,139 @@ class Modell(app: Application) : AndroidViewModel(app) {
         lieseEinrichtung()
     }
 
-    fun melde(text: String, schlimm: Boolean = false) {
-        _zustand.update { it.copy(meldung = Meldung(text, schlimm)) }
+    fun melde(text: String, schlimm: Boolean = false,
+              oeffnen: Uri? = null, oeffnenName: String = "") {
+        _zustand.update {
+            it.copy(meldung = Meldung(text, schlimm, oeffnen, oeffnenName))
+        }
     }
 
     fun meldungWeg() = _zustand.update { it.copy(meldung = null) }
 
     /* ------------------------------------------------------------ Vorgaenge */
+
+    /* ------------------------------------------------- Uebertragungen */
+
+    /**
+     * NUR EINE UEBERTRAGUNG ZUR ZEIT, und das ist keine Bequemlichkeit.
+     *
+     * Zwei gleichzeitige Vorgaenge teilen sich die Warteschlange des
+     * Vermittlers (MAX_JE_IP) und die Bandbreite -- beide werden dadurch
+     * langsamer, und beide melden Fortschritt in dasselbe Feld. Auf dem
+     * Bildschirm sprang der Balken dann zwischen zwei Dateien hin und her.
+     */
+    @Volatile
+    private var abbruchGewuenscht = false
+    private val laeuftUebertragung = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Der Anwender will nicht mehr. Wirkt zwischen zwei Bloecken. */
+    fun brichAb() {
+        abbruchGewuenscht = true
+        _zustand.update {
+            it.copy(transfer = it.transfer?.copy(phase = "Wird abgebrochen ..."))
+        }
+    }
+
+    /**
+     * Meldet den Fortschritt in den Transferzustand.
+     *
+     * Der Kern kennt drei Arten, und sie bedeuten Verschiedenes -- siehe
+     * `Transfer`. `Warten` aendert NUR die Phase: Der Balken soll seinen
+     * Stand behalten, statt bei jeder Wartezeit auf unbestimmt
+     * zurueckzuspringen.
+     */
+    private fun melde(f: Fortschritt) {
+        val nun = System.currentTimeMillis()
+        _zustand.update { z ->
+            val t = z.transfer ?: return@update z.copy(fortschritt = f)
+            val neu = when (f) {
+                is Fortschritt.Warten -> t.copy(
+                    phase = if (t.hinauf) "Warte auf den Agenten ..."
+                    else "Warte auf den Agenten ...", jetzt = nun)
+                is Fortschritt.Summe -> t.copy(
+                    phase = "Pruefsumme bilden", getan = f.getan,
+                    gesamt = f.gesamt, jetzt = nun)
+                is Fortschritt.Hoch -> {
+                    // Bloecke in Bytes umrechnen, damit Balken und Restzeit
+                    // dieselbe Groesse benutzen wie beim Herunterladen.
+                    val b = if (f.gesamt > 0)
+                        t.gesamt * f.getan / f.gesamt else t.getan
+                    t.copy(phase = "Block ${f.getan} von ${f.gesamt}",
+                           getan = b, basis = b, jetzt = nun)
+                }
+                is Fortschritt.Runter -> t.copy(
+                    phase = "Wird geholt", getan = f.getan,
+                    basis = f.getan, gesamt = f.gesamt, jetzt = nun)
+                // Stuecke EINER Nachricht. Hier vergeht bei einer Datei
+                // unter 4 MiB die gesamte Zeit -- sie ist dann ein einziger
+                // Block, und `Runter` kommt erst, wenn er ganz durch ist.
+                //
+                // Der Balken darf davon aber nur profitieren, wenn die
+                // Datei WIRKLICH in einen Block passt: Sonst waeren "37 von
+                // 90" die Stuecke des laufenden Blocks, und die auf die
+                // ganze Datei zu beziehen liesse den Balken bei jedem
+                // Blockwechsel zurueckspringen.
+                is Fortschritt.Stueck -> {
+                    // Innerhalb des LAUFENDEN Blocks umrechnen, nicht auf
+                    // die ganze Datei: Der Block reicht von `basis` bis
+                    // hoechstens BLOCK weiter.
+                    val spanne = minOf(BLOCK.toLong(), t.gesamt - t.basis)
+                        .coerceAtLeast(0)
+                    t.copy(
+                        phase = "Stueck ${f.getan} von ${f.gesamt}",
+                        getan = if (f.gesamt > 0 && spanne > 0)
+                            t.basis + spanne * f.getan / f.gesamt else t.getan,
+                        jetzt = nun)
+                }
+            }
+            // Der Messpunkt fuer die Restzeit wird beim ERSTEN echten
+            // Fortschritt gesetzt -- siehe Transfer.restSekunden.
+            val gesetzt = if (neu.gemessenAb == 0L && neu.getan > 0)
+                neu.copy(gemessenAb = nun, gemessenAbBytes = neu.getan) else neu
+            z.copy(fortschritt = f, transfer = gesetzt)
+        }
+    }
+
+    /**
+     * Wie `vorgang`, nur mit Transferzustand, Abbruch und Einzelsperre.
+     */
+    private fun uebertragung(hinauf: Boolean, name: String, gesamt: Long,
+                             was: suspend () -> Unit) {
+        if (!laeuftUebertragung.compareAndSet(false, true)) {
+            melde("Es laeuft schon eine Uebertragung. Erst die abwarten oder " +
+                  "abbrechen -- zwei gleichzeitig machen beide langsamer.",
+                  schlimm = true)
+            return
+        }
+        abbruchGewuenscht = false
+        _zustand.update {
+            it.copy(meldung = null, transfer = Transfer(
+                hinauf = hinauf, name = name,
+                phase = if (hinauf) "Wird vorbereitet" else "Wird angefragt",
+                gesamt = gesamt, jetzt = System.currentTimeMillis()))
+        }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { was() }
+            } catch (e: AhptFehler) {
+                if (e.art == Fehlerart.Abgebrochen) {
+                    melde("\"$name\" abgebrochen. Nichts uebernommen.")
+                } else {
+                    melde(e.message ?: "Der Vorgang ist fehlgeschlagen.",
+                          schlimm = true)
+                }
+            } catch (e: Exception) {
+                melde("Unerwartet: ${e.message ?: e.javaClass.simpleName}",
+                      schlimm = true)
+            } finally {
+                laeuftUebertragung.set(false)
+                abbruchGewuenscht = false
+                _zustand.update {
+                    it.copy(transfer = null, fortschritt = null, laedt = false)
+                }
+            }
+        }
+    }
 
     /**
      * Jeder Vorgang laeuft nach demselben Muster: Ladeanzeige an, Arbeit auf
@@ -288,19 +492,21 @@ class Modell(app: Application) : AndroidViewModel(app) {
      * Arbeitsspeicher an. Genau daran haengt der Unterschied zum Portal, das
      * die ganze Datei in EIN Feld legen muss.
      */
-    fun holeNach(name: String, ziel: Uri) = vorgang {
+    fun holeNach(name: String, ziel: Uri, bytes: Long = 0) =
+            uebertragung(hinauf = false, name = name, gesamt = bytes) {
         val p = _zustand.value.pfad
         val voll = if (p.isEmpty()) name else "$p/$name"
         val loeser = getApplication<Application>().contentResolver
         try {
             val e = loeser.openOutputStream(ziel)?.use { aus ->
-                client().hole(voll, aus) { f ->
-                    _zustand.update { it.copy(fortschritt = f) }
-                }
+                client().hole(voll, aus, { f -> melde(f) }, { abbruchGewuenscht })
             } ?: throw AhptFehler("Das Ziel liess sich nicht oeffnen.")
+            // Mit Angebot zum Oeffnen. Eine geholte Datei, die man erst im
+            // Dateimanager suchen muss, ist eine halb erledigte Aufgabe.
             melde(
                 "\"${e.name}\" geholt (${lesbar(e.bytes)})" +
                         if (e.summeGeprueft) ", Pruefsumme stimmt." else ".",
+                oeffnen = ziel, oeffnenName = e.name,
             )
         } catch (e: Throwable) {
             // Die halbe Datei wieder wegraeumen.
@@ -318,11 +524,69 @@ class Modell(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun legeAb(quelle: Uri) = vorgang {
+
+    /**
+     * Eine Datei holen und gleich anzeigen lassen.
+     *
+     * WARUM IN DEN ZWISCHENSPEICHER UND NICHT IN DIE ABLAGE
+     * ------------------------------------------------------
+     * Wer nur hineinsehen will, will keine Datei behalten. Landete jede
+     * Vorschau im Download-Ordner, saehe der nach einer Woche aus wie ein
+     * Papierkorb -- und die Sachen, die man wirklich aufheben wollte, gingen
+     * darin unter. Der Zwischenspeicher raeumt sich selbst, wenn der Platz
+     * knapp wird.
+     *
+     * Wer die Datei behalten will, nimmt "Speichern unter". Das ist der
+     * Unterschied, den die Auswahl beim Antippen anbietet.
+     */
+    fun oeffneVorschau(name: String, bytes: Long) =
+            uebertragung(hinauf = false, name = name, gesamt = bytes) {
+        val app = getApplication<Application>()
+        val ordner = java.io.File(app.cacheDir, "vorschau")
+        ordner.mkdirs()
+        // Die vorige Vorschau weg. Sie hat ihren Zweck erfuellt, und zwei
+        // Fassungen derselben Datei nebeneinander stiften nur Verwirrung --
+        // besonders wenn sich die Datei auf dem Server geaendert hat.
+        ordner.listFiles()?.forEach { runCatching { it.delete() } }
+
+        val sicher = name.substringAfterLast('/').substringAfterLast('\\')
+        val datei = java.io.File(ordner, sicher)
+        val p = _zustand.value.pfad
+        val voll = if (p.isEmpty()) name else "$p/$name"
+        try {
+            datei.outputStream().use { aus ->
+                client().hole(voll, aus, { f -> melde(f) }, { abbruchGewuenscht })
+            }
+        } catch (e: Throwable) {
+            // Eine halbe Datei anzuzeigen waere schlimmer als keine: Das
+            // fremde Programm meldet dann "beschaedigt", und der Anwender
+            // sucht den Fehler in seiner Datei statt in der Uebertragung.
+            runCatching { datei.delete() }
+            throw e
+        }
+        val u = androidx.core.content.FileProvider.getUriForFile(
+            app, app.packageName + ".dateien", datei)
+        _zustand.update { it.copy(oeffneJetzt = u, oeffneName = sicher) }
+    }
+
+    /** Die Oberflaeche hat geoeffnet -- den Wunsch zuruecksetzen. */
+    fun oeffnenErledigt() =
+        _zustand.update { it.copy(oeffneJetzt = null, oeffneName = "") }
+
+    fun legeAb(quelle: Uri) {
         val app = getApplication<Application>()
         val name = dateiname(quelle) ?: "unbenannt"
-        val groesse = dateigroesse(quelle)
-            ?: throw AhptFehler("Die Groesse der Datei liess sich nicht bestimmen.")
+        val groesse = dateigroesse(quelle) ?: 0L
+        uebertragung(hinauf = true, name = name, gesamt = groesse) {
+            legeAbIntern(quelle, app, name, groesse)
+        }
+    }
+
+    private suspend fun legeAbIntern(quelle: Uri, app: Application,
+                                     name: String, groesse: Long) {
+        if (groesse <= 0L) {
+            throw AhptFehler("Die Groesse der Datei liess sich nicht bestimmen.")
+        }
         val p = _zustand.value.pfad
         val ziel = if (p.isEmpty()) name else "$p/$name"
 
@@ -332,9 +596,7 @@ class Modell(app: Application) : AndroidViewModel(app) {
                 app.contentResolver.openInputStream(quelle)
                     ?: throw AhptFehler("Die Datei liess sich nicht oeffnen.")
         }
-        val a = client().lege(ziel, q) { f ->
-            _zustand.update { it.copy(fortschritt = f) }
-        }
+        val a = client().lege(ziel, q, { f -> melde(f) }, { abbruchGewuenscht })
         // Ueberschrieben wird nie -- gibt es den Namen schon, zaehlt der
         // Agent hoch. Wer das verschweigt, laesst den Nutzer glauben, er habe
         // eine aeltere Fassung ersetzt.

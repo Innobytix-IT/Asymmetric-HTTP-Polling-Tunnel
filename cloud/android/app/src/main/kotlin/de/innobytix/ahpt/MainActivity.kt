@@ -9,11 +9,14 @@
  */
 package de.innobytix.ahpt
 
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.webkit.MimeTypeMap
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -302,6 +305,9 @@ private fun Dateien(modell: Modell, zurEinrichtung: () -> Unit) {
     val z by modell.zustand.collectAsState()
     var neuerOrdner by remember { mutableStateOf(false) }
     var holeName by remember { mutableStateOf<String?>(null) }
+    var holeBytes by remember { mutableStateOf(0L) }
+    var wahlFuer by remember { mutableStateOf<Eintrag?>(null) }
+    val zusammenhang = LocalContext.current
 
     val waehleQuelle = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -311,7 +317,7 @@ private fun Dateien(modell: Modell, zurEinrichtung: () -> Unit) {
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri: Uri? ->
         val n = holeName
-        if (uri != null && n != null) modell.holeNach(n, uri)
+        if (uri != null && n != null) modell.holeNach(n, uri, holeBytes)
         holeName = null
     }
 
@@ -362,9 +368,14 @@ private fun Dateien(modell: Modell, zurEinrichtung: () -> Unit) {
             // Der Fortschritt steht OBEN und bleibt stehen. Im Portal stand er
             // zwischen Werkzeugleiste und Liste und scrollte weg -- am
             // 06.09.2026 geaendert, hier gleich richtig.
-            z.fortschritt?.let { FortschrittBalken(it) }
-            if (z.laedt && z.fortschritt == null) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
+            // Waehrend einer Uebertragung uebernimmt der Dialog. Beides
+            // gleichzeitig waere doppelt gemoppelt, und der duenne Balken
+            // unter dem Titel war genau das, was niemandem etwas sagte.
+            if (z.transfer == null) {
+                z.fortschritt?.let { FortschrittBalken(it) }
+                if (z.laedt && z.fortschritt == null) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
             }
 
             z.meldung?.let { m ->
@@ -377,6 +388,14 @@ private fun Dateien(modell: Modell, zurEinrichtung: () -> Unit) {
                         Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(m.text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        // Eine geholte Datei, die man erst im Dateimanager
+                        // suchen muss, ist eine halb erledigte Aufgabe.
+                        m.oeffnen?.let { u ->
+                            TextButton(onClick = {
+                                oeffneDatei(zusammenhang, u, m.oeffnenName)
+                                    ?.let { modell.melde(it, schlimm = true) }
+                            }) { Text("Oeffnen") }
+                        }
                         TextButton(onClick = { modell.meldungWeg() }) { Text("OK") }
                     }
                 }
@@ -419,19 +438,74 @@ private fun Dateien(modell: Modell, zurEinrichtung: () -> Unit) {
                             {
                                 IconButton(onClick = {
                                     holeName = e.name
+                                    holeBytes = e.bytes ?: 0L
                                     waehleZiel.launch(e.name)
                                 }) { Icon(Icons.Default.Download, "Herunterladen") }
                             }
                         } else null,
+                        // Antippen fragt, statt gleich zu speichern.
+                        //
+                        // Vorher fuehrte jeder Fingertipp geradewegs in den
+                        // Dokumentenwaehler -- wer nur kurz in ein Foto oder
+                        // ein Schreiben sehen wollte, musste es erst
+                        // irgendwohin ablegen und dann selbst wiederfinden.
                         modifier = Modifier.clickable {
                             if (e.istOrdner) modell.hinein(e.name)
-                            else { holeName = e.name; waehleZiel.launch(e.name) }
+                            else wahlFuer = e
                         },
                     )
                     HorizontalDivider()
                 }
             }
         }
+    }
+
+    z.transfer?.let { t ->
+        UebertragungsDialog(t) { modell.brichAb() }
+    }
+
+    // Was soll mit der angetippten Datei geschehen?
+    wahlFuer?.let { e ->
+        AlertDialog(
+            onDismissRequest = { wahlFuer = null },
+            title = { Text(e.name) },
+            text = {
+                Text(
+                    "Ansehen holt die Datei in den Zwischenspeicher und "
+                        + "uebergibt sie einem Programm auf diesem Geraet. "
+                        + "Speichern legt sie dorthin, wo du sie behalten "
+                        + "willst."
+                        + (e.bytes?.let { "\n\nGroesse: " + lesbar(it) } ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    modell.oeffneVorschau(e.name, e.bytes ?: 0L)
+                    wahlFuer = null
+                }) { Text("Ansehen") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { wahlFuer = null }) { Text("Abbrechen") }
+                    TextButton(onClick = {
+                        holeName = e.name
+                        holeBytes = e.bytes ?: 0L
+                        waehleZiel.launch(e.name)
+                        wahlFuer = null
+                    }) { Text("Speichern") }
+                }
+            },
+        )
+    }
+
+    // Eine Vorschau liegt bereit -- anzeigen und den Wunsch zuruecksetzen.
+    LaunchedEffect(z.oeffneJetzt) {
+        val u = z.oeffneJetzt ?: return@LaunchedEffect
+        oeffneDatei(zusammenhang, u, z.oeffneName)?.let {
+            modell.melde(it, schlimm = true)
+        }
+        modell.oeffnenErledigt()
     }
 
     if (neuerOrdner) {
@@ -468,6 +542,8 @@ private fun FortschrittBalken(f: Fortschritt) {
                 (if (f.gesamt > 0) f.getan.toFloat() / f.gesamt else null)
         is Fortschritt.Summe -> "Pruefsumme: ${lesbar(f.getan)} von ${lesbar(f.gesamt)}" to
                 (if (f.gesamt > 0) f.getan.toFloat() / f.gesamt else null)
+        is Fortschritt.Stueck -> "Stueck ${f.getan} von ${f.gesamt}" to
+                (if (f.gesamt > 0) f.getan.toFloat() / f.gesamt else null)
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text(text, style = MaterialTheme.typography.bodySmall)
@@ -477,5 +553,148 @@ private fun FortschrittBalken(f: Fortschritt) {
         } else {
             LinearProgressIndicator(Modifier.fillMaxWidth())
         }
+    }
+}
+
+
+/* ------------------------------------------------- Uebertragungsdialog */
+
+/**
+ * Was waehrend einer Uebertragung auf dem Bildschirm steht.
+ *
+ * WARUM EIN DIALOG UND NICHT NUR EIN BALKEN
+ * ------------------------------------------
+ * Vorher stand unter dem Titel eine Zeile wie "Pruefsumme: 8,2 MB von
+ * 8,2 MB" -- und danach passierte minutenlang sichtbar nichts. Der Grund
+ * ist harmlos: Nach der Pruefsumme geht der erste Block hinaus, und ein
+ * Block ist ein vollstaendiger Umlauf ueber den Vermittler. Nur sah man das
+ * nicht, und was man nicht sieht, haelt man fuer haengengeblieben.
+ *
+ * Der Dialog sagt deshalb dreierlei gleichzeitig: WAS gerade laeuft (die
+ * Phase), WIE WEIT (Balken und Prozent), und WIE LANGE NOCH. Und er hat
+ * einen Abbruch -- eine Uebertragung, die man nur durch Beenden der App
+ * loswird, ist keine.
+ *
+ * Er ist absichtlich NICHT wegtippbar (`onDismissRequest` tut nichts): Wer
+ * ihn versehentlich schliesst, waehrend acht Megabyte laufen, haette keinen
+ * Weg zurueck zum Abbruch.
+ */
+@Composable
+private fun UebertragungsDialog(t: Transfer, aufAbbruch: () -> Unit) {
+    // Eigene Uhr, damit die Restzeit LAEUFT.
+    //
+    // Der Zustand aendert sich nur, wenn ein Fortschritt hereinkommt -- und
+    // zwischen zwei Bloecken vergeht bei grossen Dateien eine Minute. Ohne
+    // diesen Takt stuende dieselbe Zahl die ganze Zeit da, und genau das
+    // sieht wieder nach Stillstand aus.
+    var nun by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            nun = System.currentTimeMillis()
+        }
+    }
+    val rest = t.restSekunden?.let { r ->
+        (r - (nun - t.jetzt) / 1000).coerceAtLeast(0)
+    }
+
+    AlertDialog(
+        onDismissRequest = { },
+        icon = { CircularProgressIndicator(Modifier.size(28.dp)) },
+        title = { Text(if (t.hinauf) "Wird hochgeladen" else "Wird geholt") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(t.name, style = MaterialTheme.typography.bodyMedium)
+                Text(t.phase, style = MaterialTheme.typography.bodySmall)
+
+                val anteil = t.anteil
+                if (anteil != null) {
+                    LinearProgressIndicator(
+                        progress = { anteil }, modifier = Modifier.fillMaxWidth())
+                } else {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+
+                Row(Modifier.fillMaxWidth()) {
+                    Text(
+                        if (t.gesamt > 0)
+                            "${lesbar(t.getan)} von ${lesbar(t.gesamt)}"
+                        else "Groesse noch unbekannt",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        when {
+                            rest != null -> "noch ${lesbareDauer(rest)}"
+                            // Solange nichts Belastbares da ist, wird auch
+                            // nichts behauptet. Eine Schaetzung, die von 40
+                            // Minuten auf 20 Sekunden springt, ist
+                            // schlechter als gar keine. Kurz gehalten: Der
+                            // Byte-Stand daneben brach sonst um.
+                            else -> "Restzeit offen"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = aufAbbruch) { Text("Abbrechen") }
+        },
+    )
+}
+
+/**
+ * Sekunden in etwas, das man lesen kann.
+ *
+ * Keine Nachkommastellen und keine Stunden mit Sekunden: Bei einer
+ * Schaetzung taeuscht jede zusaetzliche Stelle eine Genauigkeit vor, die
+ * sie nicht hat.
+ */
+private fun lesbareDauer(s: Long): String = when {
+    s < 60 -> "$s s"
+    s < 3600 -> "${s / 60} min ${s % 60} s"
+    else -> "${s / 3600} h ${(s % 3600) / 60} min"
+}
+
+
+/* ------------------------------------------------------ Datei oeffnen */
+
+/**
+ * Eine geholte Datei dem Geraet zum Anzeigen geben.
+ *
+ * WARUM KEINE EIGENE VORSCHAU
+ * ----------------------------
+ * Eine eingebaute Anzeige koennte Bilder. Sie koennte kein PDF, kein docx,
+ * kein Video, keine Tabelle -- und genau das sind die Dateien, die man
+ * unterwegs aufmachen will. Das Geraet hat fuer all das schon Programme,
+ * und die kennt der Anwender.
+ *
+ * Der Preis ist ehrlich zu nennen: Die Datei verlaesst damit AHPT. Was das
+ * fremde Programm damit tut -- in eine Wolke sichern etwa -- liegt nicht
+ * mehr in unserer Hand. Deshalb passiert es nur auf ausdruecklichen Wunsch
+ * und nie von selbst.
+ *
+ * `FLAG_GRANT_READ_URI_PERMISSION` ist noetig, weil die Adresse aus dem
+ * Dokumentenwaehler kommt: Ohne die Freigabe darf das andere Programm sie
+ * nicht lesen und zeigt eine leere Seite statt einer Fehlermeldung.
+ */
+private fun oeffneDatei(zusammenhang: Context, u: Uri, name: String): String? {
+    val endung = name.substringAfterLast('.', "").lowercase()
+    val typ = MimeTypeMap.getSingleton().getMimeTypeFromExtension(endung)
+        ?: zusammenhang.contentResolver.getType(u)
+        ?: "*/*"
+    val absicht = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(u, typ)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    return try {
+        zusammenhang.startActivity(absicht)
+        null
+    } catch (e: ActivityNotFoundException) {
+        // Kein Programm dafuer. Das ist keine Panne, sondern eine Auskunft
+        // -- und sie gehoert auf den Bildschirm, nicht ins Log.
+        "Auf diesem Geraet ist kein Programm fuer \"$name\" ($typ) " +
+            "eingerichtet. Die Datei liegt aber, wo du sie hingelegt hast."
     }
 }

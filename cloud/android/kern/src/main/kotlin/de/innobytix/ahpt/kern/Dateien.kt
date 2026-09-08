@@ -58,7 +58,9 @@ fun AhptClient.hole(
     pfad: String,
     ziel: OutputStream,
     melde: FortschrittMelder? = null,
+    abbruch: Abbruch? = null,
 ): HoleErgebnis {
+    abbruch.pruefe()
     val erst = inhaltOderFehler(
         frage("dateien", "hole", JSONObject()
             .put("pfad", pfad)
@@ -79,10 +81,19 @@ fun AhptClient.hole(
     if (gesamt > BLOCK) melde?.invoke(Fortschritt.Runter(von, gesamt))
 
     while (von < gesamt) {
+        // Zwischen den Bloecken, nicht mittendrin: Ein Block ist ein
+        // vollstaendiger Umlauf, und ihn halb abzubrechen liesse eine Marke
+        // beim Vermittler stehen, auf die niemand mehr antwortet.
+        abbruch.pruefe()
         val laenge = minOf(BLOCK.toLong(), gesamt - von).toInt()
+        // `melde` gehoert HIER hinein. Ohne es meldet waehrend eines
+        // Blockumlaufs niemand etwas -- und ein Umlauf dauert bei einem
+        // Block Sekunden. Auf dem Bildschirm stand dann minutenlang
+        // dieselbe Zahl, und der Anwender hielt es fuer haengengeblieben.
         val w = inhaltOderFehler(
             frage("dateien", "hole", JSONObject()
-                .put("pfad", pfad).put("von", von).put("laenge", laenge)),
+                .put("pfad", pfad).put("von", von).put("laenge", laenge),
+                melde),
             "nichts gefunden",
         )
         // Der Zeitstempel muss ueber alle Umlaeufe gleich bleiben. Aendert
@@ -128,7 +139,9 @@ fun AhptClient.lege(
     pfad: String,
     quelle: Quelle,
     melde: FortschrittMelder? = null,
+    abbruch: Abbruch? = null,
 ): JSONObject {
+    abbruch.pruefe()
     val gesamt = quelle.groesse
 
     if (gesamt <= KLEIN) {
@@ -152,6 +165,7 @@ fun AhptClient.lege(
         while (true) {
             val n = strom.read(puffer)
             if (n < 0) break
+            abbruch.pruefe()
             d.update(puffer, 0, n)
             gelesen += n
             melde?.invoke(Fortschritt.Summe(gelesen, gesamt))
@@ -165,6 +179,10 @@ fun AhptClient.lege(
 
     quelle.oeffne().use { strom ->
         for (i in 0 until bloecke) {
+            // Zwischen den Bloecken. Mittendrin abzubrechen liesse eine
+            // halbe Teildatei beim Agenten liegen; der raeumt sie zwar
+            // selbst weg, aber erst nach seiner Frist.
+            abbruch.pruefe()
             val laenge = minOf(BLOCK.toLong(), gesamt - i.toLong() * BLOCK).toInt()
             val roh = strom.lies(laenge)
             val daten = JSONObject()
@@ -177,8 +195,10 @@ fun AhptClient.lege(
             // ihn erneut mitzuschicken waere eine zweite Wahrheit.
             if (i == 0) daten.put("pfad", pfad)
             if (i == bloecke - 1) daten.put("sha256", summe)
+            // Auch hier `melde`: Ein Block von 8 MB braucht seine Zeit,
+            // und waehrenddessen soll der Bildschirm nicht schweigen.
             antwort = inhaltOderFehler(
-                frage("dateien", "lege_block", daten), "block abgewiesen",
+                frage("dateien", "lege_block", daten, melde), "block abgewiesen",
             )
             melde?.invoke(Fortschritt.Hoch(i + 1, bloecke))
         }
@@ -225,4 +245,31 @@ private fun InputStream.lies(laenge: Int): ByteArray {
         gefuellt += n
     }
     return b
+}
+
+
+/* ------------------------------------------------------------- Abbruch */
+
+/**
+ * Ein Vorgang, den der Anwender abbrechen kann.
+ *
+ * WARUM EIN RUECKRUF UND NICHT DIE KOROUTINE
+ * -------------------------------------------
+ * Dieser Kern ist bewusst frei von Android und von Koroutinen -- er laeuft
+ * genauso in einem gewoehnlichen JVM-Test. Ein `job.cancel()` haette hier
+ * ohnehin nichts ausgerichtet: Die Uebertragung steckt in blockierenden
+ * Lesevorgaengen, und Koroutinen brechen nur an Aussetzpunkten ab. Ein
+ * Rueckruf, der ZWISCHEN den Bloecken gefragt wird, wirkt dagegen sicher --
+ * und zwar an genau den Stellen, an denen ein Abbruch nichts Halbes
+ * hinterlaesst.
+ */
+fun interface Abbruch {
+    /** true heisst: der Anwender will nicht mehr. */
+    fun gewuenscht(): Boolean
+}
+
+internal fun Abbruch?.pruefe() {
+    if (this != null && gewuenscht()) {
+        throw AhptFehler("Abgebrochen.", Fehlerart.Abgebrochen)
+    }
 }

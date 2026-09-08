@@ -65,7 +65,8 @@ const val BLOCK = 4 * 1024 * 1024
 const val KLEIN = BLOCK
 
 enum class Fehlerart {
-    Netz, Abgewiesen, Umleitung, Krypto, Zeit, ZuGross, Leer, Geaendert, Pruefsumme, Sonstiges
+    Netz, Abgewiesen, Umleitung, Krypto, Zeit, ZuGross, Leer, Geaendert, Pruefsumme,
+    Abgebrochen, Sonstiges
 }
 
 class AhptFehler(
@@ -79,6 +80,25 @@ sealed interface Fortschritt {
     data class Hoch(val getan: Int, val gesamt: Int) : Fortschritt
     data class Runter(val getan: Long, val gesamt: Long) : Fortschritt
     data class Summe(val getan: Long, val gesamt: Long) : Fortschritt
+
+    /**
+     * Stueck soundso EINER Nachricht -- nicht Block soundso einer Datei.
+     *
+     * WOZU DAS NOETIG WURDE
+     * ---------------------
+     * Ein Block ist bis zu 4 MiB gross, und eine Datei darunter ist damit
+     * EIN Block. Gemeldet wurde bisher erst, wenn er ganz durch war: Auf dem
+     * Bildschirm stand von Anfang bis Ende "0 B von 4,1 MB", und dann war es
+     * fertig. Dabei zerfaellt so ein Block sehr wohl in rund neunzig Stuecke
+     * zu 48 KiB, jedes mit eigenem Abruf -- es gab also die ganze Zeit etwas
+     * zu berichten, es fragte nur niemand danach.
+     *
+     * EIGENER TYP UND NICHT `Hoch`: Den gibt es schon fuer die Bloecke einer
+     * Datei. Beides unter demselben Namen zu melden hiesse, dass der
+     * Empfaenger "3 von 90" und "1 von 2" nicht auseinanderhalten kann --
+     * und der Balken sprang entsprechend.
+     */
+    data class Stueck(val getan: Int, val gesamt: Int, val hinauf: Boolean) : Fortschritt
 }
 
 typealias FortschrittMelder = (Fortschritt) -> Unit
@@ -209,7 +229,7 @@ class AhptClient(
 
         zeiten?.frageMs = jetzt() - begonnen
         val umschlag = warte(marke, melde, zeiten)
-        val ergebnis = auspacken(marke, umschlag, sitzung)
+        val ergebnis = auspacken(marke, umschlag, sitzung, melde)
         if (zeiten != null) {
             zeiten.holenMs = jetzt() - zeiten.bereit
             zeiten.gesamtMs = jetzt() - begonnen
@@ -265,7 +285,7 @@ class AhptClient(
                 .put("teil", i)
                 .put("teile", teile)
                 .put("nutzlast", chiffre.substring(von, bis)))
-            melde?.invoke(Fortschritt.Hoch(i + 1, teile))
+            melde?.invoke(Fortschritt.Stueck(i + 1, teile, hinauf = true))
         }
         sende("frage_fertig", JSONObject()
             .put("v", AHPT_VERSION)
@@ -344,7 +364,12 @@ class AhptClient(
         }
     }
 
-    private fun auspacken(marke: String, u: JSONObject, sitzung: HandshakeIK): JSONObject {
+    private fun auspacken(
+        marke: String,
+        u: JSONObject,
+        sitzung: HandshakeIK,
+        melde: FortschrittMelder? = null,
+    ): JSONObject {
         pruefeUmschlag(u, marke)
         val krypto = u.optString("krypto")
         if (krypto != AHPT_VERFAHREN) {
@@ -361,7 +386,8 @@ class AhptClient(
         }
         val teile = u.optInt("teile", 1)
         val chiffre = if (teile > 1) {
-            stuecke(marke, teile, u.optJSONObject("nutzlast")?.optJSONArray("stuecke"))
+            stuecke(marke, teile,
+                    u.optJSONObject("nutzlast")?.optJSONArray("stuecke"), melde)
         } else {
             u.optJSONObject("nutzlast")?.optString("chiffre") ?: ""
         }
@@ -379,7 +405,12 @@ class AhptClient(
         return JSONObject(String(klartext, Charsets.UTF_8))
     }
 
-    private fun stuecke(marke: String, teile: Int, liste: JSONArray?): String {
+    private fun stuecke(
+        marke: String,
+        teile: Int,
+        liste: JSONArray?,
+        melde: FortschrittMelder? = null,
+    ): String {
         if (liste == null || liste.length() != teile) {
             throw AhptFehler("Verzeichnis und Stueckzahl passen nicht zusammen")
         }
@@ -397,6 +428,11 @@ class AhptClient(
                 throw AhptFehler("Stueck mit unbrauchbarem Dateinamen")
             }
             if (nr < 0 || nr >= teile) throw AhptFehler("Stueck mit unbrauchbarer Nummer")
+            // Hier ist die Stelle, an der die Wartezeit vergeht: Ein Block
+            // von 4 MiB zerfaellt in rund neunzig solcher Abrufe. Wer hier
+            // nichts meldet, laesst den Bildschirm die ganze Zeit "0 B"
+            // zeigen -- und das sieht aus wie haengengeblieben.
+            melde?.invoke(Fortschritt.Stueck(i + 1, teile, hinauf = false))
             val s = holeJson(datei) ?: throw AhptFehler("Stueck $nr fehlt")
             pruefeUmschlag(s, marke, nr)
             if (s.optInt("teile", -1) != teile) throw AhptFehler("Stueck $nr zaehlt anders")

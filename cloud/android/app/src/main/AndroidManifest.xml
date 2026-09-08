@@ -52,5 +52,31 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Damit ein anderes Programm eine Datei aus unserem
+             Zwischenspeicher ansehen kann.
+
+             Ein blosser file://-Verweis geht seit Android 7 nicht mehr:
+             Er loest eine FileUriExposedException aus. Der Provider
+             vergibt stattdessen eine content://-Adresse und erteilt dem
+             Empfaenger genau fuer diese eine Datei ein Leserecht, das
+             endet, sobald er fertig ist.
+
+             exported=false und grantUriPermissions=true gehoeren zusammen:
+             Niemand darf von sich aus zugreifen, nur wem wir es je Datei
+             ausdruecklich geben.
+
+             (Kein doppelter Bindestrich in XML-Kommentaren. Er ist dort
+             verboten, und in diesem Projekt ist er der uebliche
+             Gedankenstrich.) -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.dateien"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/dateipfade" />
+        </provider>
     </application>
 </manifest>

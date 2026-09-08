@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Welche Ordner der FileProvider herausgeben darf.
+
+  NUR der Vorschau-Ordner im Zwischenspeicher, und das ist Absicht: Ein
+  Provider, der mehr freigibt als noetig, gibt einem fremden Programm Zugang
+  zu allem, was die App je abgelegt hat. Hier liegt nur, was der Anwender
+  gerade ansehen wollte. Und Android raeumt den Zwischenspeicher selbst auf,
+  wenn der Platz knapp wird.
+-->
+<paths>
+    <cache-path name="vorschau" path="vorschau/" />
+</paths>
