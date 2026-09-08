@@ -1160,9 +1160,22 @@ async function lade(neuerPfad) {
     // Warum die Liste kuerzer sein kann, als der Ordner Eintraege hat.
     // Eine unvollstaendige Liste, die wie eine vollstaendige aussieht, ist
     // schlimmer als eine Fehlermeldung.
+    //
+    // Der Agent kennt DREI Gruende (handler/datei.py) -- hier standen lange
+    // nur zwei davon, `versteckt` fehlte. Wer alle Gruende nennen will, muss
+    // sie auch alle nennen; eine Liste mit zwei von drei Erklaerungen ist
+    // wieder genau die unvollstaendige Liste, um die es hier geht.
     if (d.gekappt) {
       melde('Nur die ersten <b>' + d.gekappt + '</b> Eintraege werden gezeigt. '
             + 'Der Ordner enthaelt mehr.', 'warn');
+    }
+    if (d.versteckt) {
+      melde(d.versteckt + ' ' + (d.versteckt === 1 ? 'Eintrag' : 'Eintraege')
+            + ' mit fuehrendem Punkt nicht gezeigt. Versteckte Namen laesst '
+            + 'der Agent grundsaetzlich aus &ndash; so landen <code>.git</code>, '
+            + '<code>.env</code> oder <code>.ssh</code> nie in einer Freigabe. '
+            + 'In der Wurzel ist meist AHPTs eigener Sammelordner '
+            + '<code>.ahpt-teil</code> dabei.', 'warn');
     }
     if (d.endung_gesperrt) {
       melde(d.endung_gesperrt + ' Datei(en) nicht gezeigt &ndash; ihre Endung '
