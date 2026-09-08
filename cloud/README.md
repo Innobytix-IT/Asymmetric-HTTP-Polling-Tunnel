@@ -118,9 +118,10 @@ python3 ahpt_client.py --konfig client.toml pruefen
 
 ### Im Browser
 
-`portal/index.html` oeffnen. Beim ersten Mal fragt es nach dem Schluessel
-des Agenten und erzeugt einen eigenen fuer dieses Geraet — dessen
-oeffentlichen Teil traegst du beim Agenten ein.
+`portal/index.html` oeffnen — oder die Einzeldatei `ahpt-portal-lokal.html`,
+siehe unten. Beim ersten Mal fragt es nach dem Schluessel des Agenten und
+erzeugt einen eigenen fuer dieses Geraet — dessen oeffentlichen Teil
+traegst du beim Agenten ein.
 
 Danach: Dateiliste mit Ordnern, Herunterladen, Hochladen per Ziehen und
 Ablegen (auch mehrere auf einmal, mit Fortschritt), Ordner anlegen, Filtern,
@@ -258,6 +259,35 @@ Oeffnet sich der Browser nicht von selbst, sagt das Skript es und nennt die
 Adresse -- dann von Hand einfuegen. (Pythons `webbrowser` findet unter Linux
 nur dann einen grafischen Browser, wenn `DISPLAY` gesetzt ist; ueber SSH ist
 es das nie.)
+
+### Die Einzeldatei: `ahpt-portal-lokal.html`
+
+Drei Dateien von Hand ueber Geraete zu verteilen ist laestig, und was
+laestig ist, wird falsch gemacht. Deshalb gibt es das Portal auch als EINE
+Datei -- Oberflaeche, Krypto und Protokoll darin eingebacken:
+
+```bash
+python3 portal/baue_einzeldatei.py
+```
+
+Das schreibt `portal/ahpt-portal-lokal.html`. Diese Datei kopierst du auf
+jedes Geraet, von dem aus du arbeiten willst, und oeffnest sie dort mit
+einem Doppelklick. Der Einrichtungs-Assistent nennt genau sie.
+
+**Sie liegt nicht im Repo**, und das ist Absicht: Sie ist ein Bauerzeugnis
+aus den drei Dateien daneben. Eine mitgelieferte Fassung waere eine Kopie,
+die veraltet, sobald jemand am Portal etwas aendert -- und ihr saehe man
+das nicht an.
+
+**Sie muss wirklich AUF dem Geraet liegen.** Sie von einem Server zu
+oeffnen, hiesse denselben Schutz aufzugeben, um dessentwillen es sie gibt:
+Wer die Seite ausliefert, kann sie austauschen.
+
+Ob Doppelklick (`file://`) oder `starte_lokal.py` (`http://localhost`) --
+beides sind sichere Zusammenhaenge, beides funktioniert. Der Unterschied
+steht im Absatz darueber: Eine `file://`-Seite darf je nach Browser keinen
+`http`-Webspace mehr ansprechen. Liegt dein Vermittler auf http, nimm
+`starte_lokal.py`; auf https tut es der Doppelklick.
 
 **Warum nicht einfach die Datei doppelklicken?** Zwei Browserregeln ziehen
 gegeneinander: `crypto.subtle` gibt es nur im sicheren Kontext (dazu zaehlt

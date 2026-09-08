@@ -594,9 +594,13 @@ private fun UebertragungsDialog(t: Transfer, aufAbbruch: () -> Unit) {
             nun = System.currentTimeMillis()
         }
     }
-    val rest = t.restSekunden?.let { r ->
-        (r - (nun - t.jetzt) / 1000).coerceAtLeast(0)
-    }
+    // Wie lange schon nichts mehr hereinkam.
+    //
+    // Das ist KEINE Schaetzung, sondern eine Messung: `t.jetzt` ist der
+    // Zeitpunkt der letzten Fortschrittsmeldung. Deshalb darf diese Zahl
+    // etwas behaupten, wo die Restzeit es laengst nicht mehr darf.
+    val stille = (nun - t.jetzt) / 1000
+    val rest = t.restSekunden?.let { (it - stille).coerceAtLeast(0) }
 
     AlertDialog(
         onDismissRequest = { },
@@ -630,7 +634,18 @@ private fun UebertragungsDialog(t: Transfer, aufAbbruch: () -> Unit) {
                             // einer Uebertragung aus, die gar nicht mehr
                             // ans Ende kommen soll.
                             t.abbruch -> ""
-                            rest != null -> "noch ${lesbareDauer(rest)}"
+                            // Schweigt es zu lange, hat die Schaetzung
+                            // ausgedient -- dann zaehlt, was gemessen ist.
+                            // Vorher zaehlte die Restzeit stur bis Null und
+                            // blieb dort stehen: "noch 0 s", waehrend sich
+                            // nichts mehr ruehrte. Genau das Bild von
+                            // Stillstand, gegen das dieser Dialog gebaut
+                            // wurde.
+                            stille >= STILL_AB -> "seit ${lesbareDauer(stille)} still"
+                            rest != null && rest > 0 -> "noch ${lesbareDauer(rest)}"
+                            // Die Schaetzung ist aufgebraucht, es kommt aber
+                            // noch etwas an. Keine Zahl mehr behaupten.
+                            rest != null -> "gleich fertig"
                             // Solange nichts Belastbares da ist, wird auch
                             // nichts behauptet. Eine Schaetzung, die von 40
                             // Minuten auf 20 Sekunden springt, ist
@@ -654,6 +669,18 @@ private fun UebertragungsDialog(t: Transfer, aufAbbruch: () -> Unit) {
         },
     )
 }
+
+/**
+ * Ab wann Schweigen erwaehnenswert ist.
+ *
+ * Zwanzig Sekunden, nicht zehn. Waehrend des Wartens meldet der Client bei
+ * jedem Abruf (hoechstens 1,5 s Abstand), und beim Holen vor jedem Stueck
+ * -- Schweigen entsteht also nur, wenn ein einzelner Abruf lange braucht.
+ * Ein Stueck von 48 KiB ueber eine schlechte Mobilfunkstrecke kann gut
+ * dreizehn Sekunden dauern, und das ist kein Fehler, sondern langsam. Erst
+ * jenseits davon ist die Stille eine Auskunft.
+ */
+private const val STILL_AB = 20L
 
 /**
  * Sekunden in etwas, das man lesen kann.

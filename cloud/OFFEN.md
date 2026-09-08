@@ -8,32 +8,48 @@ Stand: 08.09.2026
 
 ---
 
-## 1. Die App verliert ein Byte, wenn der Server per Verbindungsabbau rahmt
+## 1. Eine abgeschnittene Antwort, die sich nicht wieder einfangen laesst
 
-Am 08.09.2026 im Emulator gemessen:
+Am 08.09.2026 im Emulator EINMAL gesehen:
 
 ```
 kode=200  laenge=137  text={"ok":true,...,"antwort_add81a….json"     <- } fehlt
 ```
 
-Der Vermittler sendet 138 Byte, die App liest 137, das JSON ist kaputt, und
-auf dem Schirm steht "Abgewiesen (HTTP 200): keine Begruendung".
+Die Antwort war 138 Byte lang, angekommen sind 137, das JSON war
+unbrauchbar, und auf dem Schirm stand "Abgewiesen (HTTP 200): keine
+Begruendung".
 
-**Ursache der Rahmung, nicht der Menge:** `php -S` sendet weder
-`Content-Length` noch `Transfer-Encoding` -- es schliesst nur die
-Verbindung. Javas `HttpURLConnection` verliert dabei das letzte Byte. Sobald
-eine Laengenangabe da war, war der Fehler weg. Python (Kommandozeile) und
-der Browser (Portal) kommen mit der Abbau-Rahmung klar.
+**Die damals notierte Ursache ist widerlegt.** Sie lautete: `php -S` rahmt
+durch Verbindungsabbau, und Javas `HttpURLConnection` verliere dabei das
+letzte Byte. Nachgemessen wurde das am 08.09.2026 abends in drei
+Umgebungen, jeweils mit demselben 138-Byte-Koerper, dessen letztes Zeichen
+die Klammer ist:
 
-**In der Praxis nicht erreichbar:** bplaced liefert `Transfer-Encoding:
-chunked`, und die App laeuft dort. Es bleibt aber eine echte Ungleichheit
-zwischen den drei Clients.
+| Umgebung                             | Pruefung                          | Ergebnis |
+|--------------------------------------|-----------------------------------|----------|
+| JVM                                  | `kern/.../NetzRahmungTest`        | 138/138  |
+| SM-G970F, Android 12                 | `app/.../NetzRahmungGeraetTest`   | 138/138  |
+| Emulator, durch die Netz-Nachbildung | dieselbe Pruefung ueber 10.0.2.2  | 138/138  |
 
-**Warum nicht behoben:** Die Ursache in Java ist nicht zu Ende untersucht.
-Eine geratene Reparatur an der Stelle, an der Bytes gezaehlt werden, ist
-schlechter als ein bekannter, eingegrenzter Mangel.
+Geprueft sind alle vier Rahmungen, die AHPT antrifft: `Content-Length`,
+`chunked`, HTTP/1.1 mit blossem Verbindungsabbau, HTTP/1.0 ohne jede
+Laengenangabe. Ausserdem nachgesehen, was `php -S` wirklich sendet: fuer
+statische Dateien `Content-Length`, fuer erzeugte Ausgabe nur
+`Connection: close` -- und `curl` bekommt auch dann alle 138 Byte.
 
----
+**Was bleibt:** eine einzelne Beobachtung ohne Erklaerung. Der Verdacht
+liegt jetzt auf der Serverseite jenes Aufbaus -- eine Antwort, die schon
+unvollstaendig entstand -- aber die Artefakte von damals gibt es nicht
+mehr, und ohne sie ist jede weitere Zuordnung geraten.
+
+**Warum der Punkt trotzdem stehen bleibt:** weil "nicht reproduzierbar"
+nicht "war nicht da" heisst. Kaeme es wieder, waere der erste Griff der
+Vergleich von `rumpf_bytes` und `content_length` -- siehe Punkt 2, der
+genau dafuer gebaut ist.
+
+Die Pruefungen bleiben ebenfalls stehen. Sie kosten nichts und decken eine
+Klasse von Fehlern ab, die man sonst erst im Betrieb bemerkt.
 
 ## 2. Der Notbehelf in relay.php bleibt vorerst drin
 
@@ -41,8 +57,10 @@ schlechter als ein bekannter, eingegrenzter Mangel.
 `ahpt/protokollfehler.log` und nennt sich dort selbst TEMPORAER -- angelegt
 wegen der Stueck-Ausfaelle vom 05.09.2026.
 
-**Stand:** Die Datei existiert auf dem Webspace nicht (HTTP 404). Seit dem
-05.09. hat also kein einziger Aufruf diesen Zweig erreicht.
+**Stand:** Die Datei existiert auf dem Webspace nicht (HTTP 404,
+nachgesehen am 08.09.2026 abends; `selbsttest` antwortet, der Vermittler
+lebt also und schweigt nicht bloss). Seit dem 05.09. hat kein einziger
+Aufruf diesen Zweig erreicht.
 
 **Warum er bleibt:** "Nicht wieder aufgetreten" ist nicht "verstanden". Der
 konkrete Verdacht ist eine Drosselung durch den Hoster, und der Block ist
@@ -54,44 +72,6 @@ wiederkommt, steht die Antwort in einer Zeile.
 Nebenbei: Die Datei laege im oeffentlich lesbaren Ablage-Ordner. Sie
 enthaelt nichts Geheimes (Zeitstempel, Aktion, Byte-Zahlen) und ist bei
 1 MB gedeckelt.
-
----
-
-## 3. `ahpt-portal-lokal.html` kommt in der README nicht vor
-
-Der Einrichtungs-Assistent verweist den Anwender ausdruecklich auf diese
-Datei ("muss wirklich AUF diesem Geraet liegen"). Sie ist aber ein
-Bauerzeugnis aus `portal/baue_einzeldatei.py` und liegt deshalb **nicht im
-Repo** -- und die README erwaehnt weder die Datei noch das Skript.
-
-Wer das Repo klont, findet das Portal also nur als drei Einzeldateien und
-erfaehrt nirgends, wie daraus die eine wird, von der der Assistent spricht.
-
----
-
-## 4. `D:\AHPT Cloud 3000\ahpt` haengt hinter GitHub
-
-Der oertliche Ordner des Cloud-3000-Abzweigs ist aelter als der Stand im
-Repo: Das `kennung`-Feature (User-Agent, `netz.setze_kennung`) und
-`tests/pruefe_transport.py` gibt es nur dort.
-
-**Wichtig vor jeder Weiterarbeit dort:** erst den Ordner auffrischen. Ein
-Push von oertlich wuerde beides loeschen. GitHub ist der massgebliche Stand.
-
----
-
-## 5. Der Restzeit-Takt laeuft auch, wenn nichts mehr passiert
-
-Der Uebertragungsdialog hat eine eigene Uhr im Sekundentakt, damit die
-Restzeit zwischen zwei Fortschrittsmeldungen weiterlaeuft. Sie zaehlt aber
-stur herunter, auch wenn die Uebertragung wirklich haengt: Bei Null bleibt
-"noch 0 s" stehen, und das sieht dann wieder aus wie der Stillstand, den der
-Dialog gerade beheben sollte.
-
-**Warum nicht sofort behoben:** Was dort stattdessen stehen sollte, haengt
-davon ab, wie oft das im Betrieb ueberhaupt vorkommt. "Dauert laenger als
-gedacht" waere ehrlich, ist aber geraten, solange niemand einen Fall gesehen
-hat.
 
 ---
 
@@ -131,3 +111,37 @@ hat.
   Oberflaeche, die Bedingung eine des Modells. Sobald der Dialog wegtippbar
   wird oder eine Uebertragung in den Hintergrund darf, ist sie das einzige,
   was noch haelt. Die Begruendung im Code sagt das jetzt so.
+
+- **08.09.2026 -- `ahpt-portal-lokal.html` steht jetzt in der README.**
+  Ein eigener Abschnitt: wie sie gebaut wird (`portal/baue_einzeldatei.py`),
+  warum sie nicht im Repo liegt (Bauerzeugnis, das sonst veraltet), warum
+  sie wirklich auf dem Geraet liegen muss, und wann Doppelklick reicht und
+  wann es `starte_lokal.py` braucht. Der Assistent verweist auf sie, ohne
+  dass die README sie kannte -- das war die Luecke.
+
+- **08.09.2026 -- `D:\AHPT Cloud 3000\ahpt` ist aufgefrischt.** Vorher
+  gesichert nach `ahpt.vor_auffrischen_<Stempel>`, dann elf Dateien aus dem
+  Repo uebernommen (neun aelter als dort, zwei fehlten ganz:
+  `tests/pruefe_transport.py`, `tests/gmx_webdav_test.py`). Beim Uebernehmen
+  wurde die Anonymisierung zurueckgesetzt: Wo im Repo `/home/DEIN-NUTZER`
+  steht, steht oertlich wieder der echte Pfad. Ergebnis: 41 Dateien
+  gleich, abweichend nur
+  `config-beispiel.toml` (die Falle selbst), oertlich zusaetzlich nur
+  `client.toml`, das Gesundheits-Gedaechtnis und das gebaute Portal.
+
+  **Nebenbefund, ungeprueft:** Die 3000-README im Repo ist eine echte
+  Neufassung, keine Fortschreibung. Ein paar Abschnitte der Cloud-README
+  stehen nicht mehr darin. Bei den meisten ist das einleuchtend (sie
+  handeln vom PHP-Weg), bei "Ordner anlegen -- und warum es keinen
+  Abgleich gibt" nicht: Der Abschnitt gilt fuer 3000 genauso. Nicht
+  angefasst, weil das eine Entscheidung ueber einen anderen Zweig waere.
+
+- **08.09.2026 -- Der Restzeit-Takt behauptet nichts mehr, was er nicht
+  weiss.** Vorher zaehlte er stur bis Null und blieb bei "noch 0 s" stehen.
+  Jetzt misst der Dialog, wie lange nichts mehr hereinkam -- das ist eine
+  Messung, keine Schaetzung, denn der Zeitpunkt der letzten
+  Fortschrittsmeldung steht im Zustand. Ab zwanzig Sekunden Stille steht
+  dort "seit 25 s still" statt einer Restzeit. Zwanzig und nicht zehn, weil
+  ein Stueck von 48 KiB ueber eine schlechte Mobilfunkstrecke gut dreizehn
+  Sekunden dauern kann; das ist langsam, nicht kaputt. Ist die Schaetzung
+  aufgebraucht, kommt aber noch etwas an, heisst es "gleich fertig".

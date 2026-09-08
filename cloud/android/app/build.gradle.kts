@@ -23,6 +23,11 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        // Fuer Pruefungen, die AUF dem Geraet laufen muessen. Der Kern
+        // laesst sich auf der JVM pruefen, Androids Netzschicht nicht: Dort
+        // liegt unter HttpURLConnection OkHttp, auf der JVM nicht. Ein
+        // Unterschied zwischen beiden faellt nur hier auf.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -49,6 +54,7 @@ android {
     }
 
     sourceSets["main"].kotlin.srcDir("src/main/kotlin")
+    sourceSets["androidTest"].kotlin.srcDir("src/androidTest/kotlin")
 }
 
 dependencies {
@@ -81,4 +87,9 @@ dependencies {
     // bplaced rund dreieinhalb Minuten, und so lange muss niemand das Telefon
     // wachhalten.
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+
+    // Nur fuer die Geraetepruefungen (src/androidTest). Sie wandern nicht
+    // ins ausgelieferte APK.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }

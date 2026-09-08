@@ -521,18 +521,27 @@ class AhptClient(
  * wieder, und wieder, denn ein Knopf ohne Wirkung ist ein kaputter Knopf.
  *
  * Gefragt wird deshalb an vier Stellen. Alle vier hinterlassen nichts
- * Halbes -- nur etwas Liegengebliebenes, das von selbst verfaellt:
+ * Halbes -- nur etwas Liegengebliebenes, das der Vermittler wegraeumt:
  *
- * | Stelle                    | was liegen bleibt         | verfaellt nach |
- * |---------------------------|---------------------------|----------------|
- * | zwischen den Bloecken     | nichts                    | --             |
- * | Frage hinauf, je Stueck   | unsichtbare Teilfrage     | MARKE_TTL      |
- * | Warten auf den Agenten    | Antwort ohne Abholer      | ANTWORT_TTL    |
- * | Antwort herunter, je St.  | der Rest der Antwort      | ANTWORT_TTL    |
+ * | Stelle                    | was liegen bleibt         | Frist       |
+ * |---------------------------|---------------------------|-------------|
+ * | zwischen den Bloecken     | nichts                    | --          |
+ * | Frage hinauf, je Stueck   | unsichtbare Teilfrage     | MARKE_TTL   |
+ * | Warten auf den Agenten    | Antwort ohne Abholer      | ANTWORT_TTL |
+ * | Antwort herunter, je St.  | der Rest der Antwort      | ANTWORT_TTL |
+ *
+ * GENAU GENOMMEN raeumt er es beim NAECHSTEN zustandsaendernden Zugriff,
+ * der nach Ablauf der Frist kommt -- der Sammler haengt in `relay.php` an
+ * `zustand_aendern()`, nicht an einer Uhr. `selbsttest` raeumt nicht, und
+ * das Pollen auch nicht: Es liest `warteschlange.json` statisch, ohne
+ * `relay.php` ueberhaupt anzufassen. Nach einem Abbruch kann also eine
+ * abgelaufene Antwort noch eine Weile in `wartet_auf_abholung` stehen --
+ * am 08.09.2026 nachgesehen und genau so vorgefunden. Sie verschwindet,
+ * sobald wieder jemand etwas fragt.
  *
  * Genau dieselbe Lage entsteht, wenn die App abstuerzt oder das Netz
- * wegbricht -- der Vermittler raeumt das ohnehin. Dafuer wirkt "Abbrechen"
- * jetzt innerhalb eines Stueckes statt innerhalb eines Blocks.
+ * wegbricht. Dafuer wirkt "Abbrechen" jetzt innerhalb eines Stueckes statt
+ * innerhalb eines Blocks.
  */
 fun interface Abbruch {
     /** true heisst: der Anwender will nicht mehr. */
