@@ -222,12 +222,28 @@ class Modell(app: Application) : AndroidViewModel(app) {
     /* ------------------------------------------------- Uebertragungen */
 
     /**
-     * NUR EINE UEBERTRAGUNG ZUR ZEIT, und das ist keine Bequemlichkeit.
+     * NUR EINE UEBERTRAGUNG ZUR ZEIT -- das ZWEITE Schloss, nicht das erste.
      *
-     * Zwei gleichzeitige Vorgaenge teilen sich die Warteschlange des
-     * Vermittlers (MAX_JE_IP) und die Bandbreite -- beide werden dadurch
-     * langsamer, und beide melden Fortschritt in dasselbe Feld. Auf dem
-     * Bildschirm sprang der Balken dann zwischen zwei Dateien hin und her.
+     * Das erste ist der Uebertragungsdialog: Er ist modal, und solange er
+     * steht, erreicht kein Fingertipp die Liste oder den Hochladen-Knopf
+     * dahinter. Alle drei Einstiege (Speichern, Ansehen, Hochladen) fuehren
+     * ueber genau diese beiden Bedienelemente. Ueber die Oberflaeche ist
+     * die Meldung unten also gar nicht zu erreichen -- am 08.09.2026
+     * festgestellt, nachdem jemand vergeblich versucht hat, sie zu sehen.
+     *
+     * WARUM SIE TROTZDEM BLEIBT
+     * --------------------------
+     * Weil die Modalitaet eine Entscheidung der Oberflaeche ist und diese
+     * Bedingung eine des Modells. Beides faellt heute zufaellig zusammen.
+     * Sobald der Dialog wegtippbar wird oder eine Uebertragung in den
+     * Hintergrund darf -- beides naheliegende Wuensche --, ist dieses
+     * Schloss das einzige, das noch haelt.
+     *
+     * Und es haelt gegen etwas Reales: Zwei gleichzeitige Vorgaenge teilen
+     * sich die Warteschlange des Vermittlers (MAX_JE_IP) und die
+     * Bandbreite, beide werden langsamer, und beide melden Fortschritt in
+     * dasselbe Feld -- der Balken spraenge zwischen zwei Dateien hin und
+     * her.
      */
     @Volatile
     private var abbruchGewuenscht = false

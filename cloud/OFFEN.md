@@ -80,19 +80,7 @@ Push von oertlich wuerde beides loeschen. GitHub ist der massgebliche Stand.
 
 ---
 
-## 5. Die Einzelsperre der App ist nur im Code geprueft
-
-Wer waehrend eines laufenden Downloads eine zweite Datei antippt, sollte
-eine Meldung bekommen statt eines zweiten Vorgangs. Die Sperre haengt an
-einem `AtomicBoolean` in `Modell.uebertragung()`; gesehen hat den Fall
-noch niemand.
-
-**Zum Nachholen:** grosse Datei holen und, waehrend sie laeuft, eine
-zweite antippen.
-
----
-
-## 6. Der Restzeit-Takt laeuft auch, wenn nichts mehr passiert
+## 5. Der Restzeit-Takt laeuft auch, wenn nichts mehr passiert
 
 Der Uebertragungsdialog hat eine eigene Uhr im Sekundentakt, damit die
 Restzeit zwischen zwei Fortschrittsmeldungen weiterlaeuft. Sie zaehlt aber
@@ -131,3 +119,15 @@ hat.
   Nebenbei richtiggestellt: In der ersten Fassung dieses Punktes stand,
   der Rueckruf werde "zwischen den Bloecken UND zwischen den Stuecken"
   gefragt. Das war falsch. Jetzt stimmt es.
+
+- **08.09.2026 -- Die Einzelsperre ist ueber die Oberflaeche nicht zu
+  erreichen, und das ist die Antwort.** Beim Versuch, sie auszuloesen, kam
+  heraus: Der Uebertragungsdialog ist modal. Solange er steht, erreicht
+  kein Fingertipp die Liste oder den Hochladen-Knopf dahinter -- und alle
+  drei Einstiege fuehren ueber genau diese beiden. Die Meldung "Es laeuft
+  schon eine Uebertragung" kann also niemand sehen.
+
+  Die Sperre bleibt trotzdem: Die Modalitaet ist eine Entscheidung der
+  Oberflaeche, die Bedingung eine des Modells. Sobald der Dialog wegtippbar
+  wird oder eine Uebertragung in den Hintergrund darf, ist sie das einzige,
+  was noch haelt. Die Begruendung im Code sagt das jetzt so.
