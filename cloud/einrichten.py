@@ -45,7 +45,7 @@ SICHERHEIT
 """
 
 import argparse
-import http.client
+import base64
 import ipaddress
 import io
 import json
@@ -634,46 +634,62 @@ def _relay_selbsttest(basis):
 
 # ------------------------------------------------------- Vermittler messen
 #
-# WOZU DAS HIER STEHT UND NICHT IN starten.py
-# --------------------------------------------
-# Die Oberflaeche soll messen KOENNEN, aber nicht WISSEN, wie gemessen wird.
-# Steht die Logik hier, benutzen Fenster und Browserseite dieselbe -- und es
-# gibt nur eine Stelle, die richtig sein muss.
+# WAS HIER GEMESSEN WIRD -- UND WARUM NICHT DIE BANDBREITE
+# ---------------------------------------------------------
+# Die erste Fassung dieses Werkzeugs (08.09.2026, vormittags) hatte eine
+# eigene Aktion im Vermittler, die einfach acht Megabyte hin- und
+# herschob. Sie mass die Leitung -- und damit die falsche Zahl.
 #
-# WAS DIESE MESSUNG BEANTWORTET
-# ------------------------------
-# Nicht "wie schnell ist mein Internet" -- das sagt jeder Speedtest. Sondern:
-# LEBT DER VERMITTLER NOCH, und ist er noch so schnell wie neulich? Bei
-# kostenlosem Webspace ist das die haeufigste Ursache fuer "AHPT ist so
-# langsam geworden", und sie ist von aussen unsichtbar: Die Seite laedt, der
-# Selbsttest sagt "ok", und trotzdem braucht eine Datei zehn Minuten. Wer das
-# nicht messen kann, sucht den Fehler bei sich -- im WLAN, im Agenten, im
-# Handy -- und findet ihn nie.
+# Was AHPT wirklich kostet, steckt naemlich woanders: in der Stueckgroesse
+# (48 KiB), in einem HTTP-Umlauf je Stueck, im Aufblaehen durch Base64 (aus
+# 1 MB werden 1,33 MB), in `schreibe_atomar` mit Schreiben und Umbenennen
+# je Stueck, in den 503-Wiederholungen eines ausgelasteten Webspace. Ein
+# Vermittler kann 200 Mbit/s auf einer einzelnen Verbindung schaffen und
+# fuer eine Datei trotzdem Minuten brauchen. Genau diesen Fall gab es zu
+# finden, und genau ihn hat die Bandbreitenmessung nicht gesehen.
 #
-# VIER WERTE, UND JEDER SAGT ETWAS ANDERES
-# -----------------------------------------
-#   TCP        Wie lange die blosse Verbindungsaufnahme dauert. Das ist der
-#              NETZWEG, ohne jede Rechenarbeit des Hosters.
-#   Umlauf     Dasselbe plus PHP: Der Vermittler muss anlaufen, zwei Dateien
-#              lesen und antworten. Genau diesen Umlauf macht der Agent
-#              mehrmals je Sekunde -- er bestimmt, wie flott sich AHPT
-#              anfuehlt, ganz unabhaengig von der Bandbreite.
-#   Herunter   Was vom Webspace hierher fliesst.
-#   Hinauf     Was von hier zum Webspace fliesst.
+# Diese Fassung tut deshalb das, was der Agent im Betrieb auch tut:
 #
-# Der Vergleich der ersten beiden ist der eigentliche Befund: 20 ms TCP und
-# 900 ms Umlauf heisst, die Leitung ist in Ordnung und der HOSTER ist am
-# Ende. Umgekehrt heisst es, das Netz dazwischen taugt nichts.
+#   1. Frage ablegen                      action=frage      (Client-Rolle)
+#   2. Warteschlange und Frage abholen    statisch          (Agent-Rolle)
+#   3. Stuecke ablegen                    action=stueck x N (Agent-Rolle)
+#   4. Antwort ablegen                    action=antwort    (Agent-Rolle)
+#   5. Warteschlange abholen              statisch          (Client-Rolle)
+#   6. Antwort und Stuecke abholen        statisch          (Client-Rolle)
 #
-# BEIDE RICHTUNGEN, WEIL AHPT BEIDE BRAUCHT
-# ------------------------------------------
-# Jedes Byte legt den Weg zweimal zurueck: Der Agent laedt es HINAUF, der
-# Client holt es HERUNTER. Die langsamere der beiden Richtungen bestimmt das
-# Tempo -- und bei Webspace ist das fast immer das Hinauf.
+# Kein einziger Aufruf, den es nicht ohnehin gaebe. Der Vermittler bleibt
+# so dumm wie er war, und wer das Geheimnis hat, bekommt keine Faehigkeit
+# dazu, die er nicht schon hatte -- Stuecke ablegen durfte er immer. Auch
+# der Verstaerker faellt weg: Um N Byte zurueckzuholen, muss man erst N Byte
+# hinaufschieben.
+#
+# DIE ZWEI WARTEZEITEN
+# ---------------------
+# Zum Rundlauf gehoert zweimal Warten, und es sind ZWEI VERSCHIEDENE Takte:
+#
+#   Agent-Takt   Bis der Agent die Frage bemerkt. `poll_abstand` aus seiner
+#                Konfiguration, Vorgabe 1,0 s. ECHTER ZUFALL: Je nachdem,
+#                wann die Frage relativ zu seiner Schleife eintrifft,
+#                zwischen null und einem vollen Takt. Im Mittel die Haelfte.
+#
+#   Client-Takt  Bis der Client die Antwort bemerkt. KEIN Zufall: Der Client
+#                faengt an zu fragen, sobald er die Frage abgelegt hat, sein
+#                Fahrplan steht also fest -- 350 ms, dann mal 1,3, gedeckelt
+#                bei 1500 ms. Portal und App gleich, der Kommandozeilen-
+#                Client faengt bei 400 ms an. Ausrechenbar, nicht geschaetzt.
+#
+# Beide werden GETRENNT ausgewiesen und nicht in die Arbeitszeit gemischt.
+# Sonst wuerde der Zufall des Agent-Takts genau die Zahl verrauschen, auf
+# die es ankommt -- den Vergleich mit der Messung von letzter Woche.
 
-MESSUNG_MAX = 8 * 1024 * 1024        # Bytes -- muss zu MESSUNG_MAX in relay.php passen
-MESSUNG_ZIEL_S = 2.5                 # so lange soll ein Durchgang dauern
+MESS_DATEI = 1024 * 1024          # Bytes -- Groesse der gedachten Testdatei
+MESS_STUECK = 49152               # muss MAX_STUECK in relay.php gleichen
+MESS_FENSTER = os.path.join(KONFIG_ORDNER, 'messung_laeuft')
 MESSUNG_DATEI = os.path.join(KONFIG_ORDNER, 'messungen.json')
+
+# Der Rueckfall-Fahrplan der Clients. Steht in portal/ahpt.js, in der App
+# (Protokoll.kt) und -- mit anderem Anfang -- in ahpt_client.py.
+CLIENT_ANFANG, CLIENT_DECKEL, CLIENT_FAKTOR = 0.350, 1.500, 1.3
 
 
 def _geheimnis_lesen():
@@ -686,10 +702,9 @@ def _geheimnis_lesen():
     pfad = os.path.join(KONFIG_ORDNER, 'geheimnis_privat')
     if not os.path.isfile(pfad):
         raise EinrichtenFehler(
-            'Das gemeinsame Geheimnis fehlt (%s). Ohne es laesst sich beim '
-            'Vermittler nichts messen -- die Messung ist angemeldet, damit '
-            'sie nicht jeder Fremde ausloesen kann. Die Datei entsteht im '
-            'Schritt "Vermittler".' % pfad)
+            'Das gemeinsame Geheimnis fehlt (%s). Ohne es lassen sich keine '
+            'Stuecke ablegen, und ohne die gibt es keinen Rundlauf zu '
+            'messen. Die Datei entsteht im Schritt "Vermittler".' % pfad)
     with open(pfad, 'rb') as f:
         wert = f.read().decode('ascii', 'replace').strip()
     if len(wert) < 16:
@@ -697,6 +712,36 @@ def _geheimnis_lesen():
             'Das Geheimnis in %s ist zu kurz (%d Zeichen, noetig sind 16). '
             'Der Vermittler wuerde es ebenfalls abweisen.' % (pfad, len(wert)))
     return wert
+
+
+def _agent_takt():
+    """poll_abstand aus der Agent-Konfiguration, sonst die Vorgabe."""
+    pfad = os.path.join(KONFIG_ORDNER, 'agent_privat.toml')
+    try:
+        import tomllib
+        with open(pfad, 'rb') as f:
+            return float((tomllib.load(f).get('relay') or {})
+                         .get('poll_abstand', 1.0))
+    except Exception:
+        return 1.0
+
+
+def _client_wartezeit(bereit, abruf):
+    """Wann bemerkt ein Client die Antwort? Ausgerechnet, nicht geraten.
+
+    `bereit` ist die Zeit vom Ablegen der Frage bis die Antwort in der
+    Warteschlange steht, `abruf` die Dauer eines einzelnen statischen
+    Abrufs. Zurueck kommt, wie lange der Client DANACH noch wartet, weil
+    sein naechster Abruf erst spaeter faellt.
+
+    Der erste Abruf faellt auf t = 0, noch vor der ersten Pause -- so
+    stehen es portal/ahpt.js und Protokoll.kt uebereinstimmend.
+    """
+    t, abstand = 0.0, CLIENT_ANFANG
+    while t < bereit:
+        t += abruf + abstand
+        abstand = min(CLIENT_DECKEL, abstand * CLIENT_FAKTOR)
+    return t - bereit
 
 
 def _messung_tcp_ms(basis, versuche=3):
@@ -712,12 +757,9 @@ def _messung_tcp_ms(basis, versuche=3):
     wirt = u.hostname
     if not wirt:
         return None
-    zeiten = []
-    fehl = 0
+    zeiten, fehl = [], 0
     # Ein Versuch mehr als gezaehlt: Der erste traegt Namensaufloesung, ARP
-    # und Routenwahl und misst damit alles Moegliche ausser der Strecke. Am
-    # 08.09.2026 kam deshalb ein TCP-Wert HOEHER als der ganze Umlauf heraus
-    # -- der Teil groesser als das Ganze, und das sah nach einem Defekt aus.
+    # und Routenwahl und misst damit alles Moegliche ausser der Strecke.
     for i in range(versuche + 1):
         t0 = time.perf_counter()
         try:
@@ -728,104 +770,35 @@ def _messung_tcp_ms(basis, versuche=3):
         except OSError:
             fehl += 1
             # Nach zwei Fehlschlaegen ohne einen einzigen Erfolg aufhoeren.
-            # Ein Rechner, der nicht antwortet, laesst jeden Versuch in den
-            # vollen Zeitablauf laufen -- vier davon sind eine halbe Minute,
-            # in der die Oberflaeche nur "Verbindung aufbauen ..." sagt. Die
-            # Auskunft wird davon nicht besser: Zweimal nichts ist dieselbe
-            # Auskunft wie viermal nichts.
+            # Zweimal nichts ist dieselbe Auskunft wie viermal nichts, und
+            # viermal nichts dauert eine halbe Minute.
             if fehl >= 2 and not zeiten:
                 return None
     return min(zeiten) if zeiten else None
 
 
-class _Messverbindung:
-    """Eine offene Verbindung fuer mehrere Durchgaenge.
+def _messfenster(sekunden):
+    """Dem laufenden Agenten sagen, dass die naechsten Fragen die eigenen sind.
 
-    Je Durchgang neu aufzubauen hiesse, jedes Mal den Handschlag mitzumessen
-    -- bei kurzen Durchgaengen ist der groesser als der Rest. Und TCP faengt
-    langsam an (slow start): Die ersten Zehntelsekunden einer frischen
-    Verbindung sind nie das, was die Leitung wirklich kann.
+    VOR dem Ablegen, nicht danach: Die Marke vergibt der Vermittler, sie
+    steht also erst fest, wenn die Frage schon in der Warteschlange liegt.
+    Wer erst danach Bescheid gaebe, liesse ein Rennen von Millisekunden
+    gegen einen Takt von einer Sekunde laufen. Siehe messung_laeuft() in
+    relay_agent.py.
     """
-
-    def __init__(self, basis):
-        u = urllib.parse.urlparse(basis)
-        self.pfad = u.path.rstrip('/')
-        self.zertifikat_ungeprueft = False
-        if u.scheme == 'https':
-            import ssl
-            try:
-                self.v = http.client.HTTPSConnection(u.netloc, timeout=45)
-                self.v.connect()
-            except ssl.SSLError:
-                # Selbstsignierte Zertifikate sind auf Freihosting die Regel
-                # -- am 07.09.2026 stolperte schon der FTP-Schritt darueber.
-                # Gemessen wird trotzdem; die Oberflaeche sagt es dazu.
-                self.v = http.client.HTTPSConnection(
-                    u.netloc, timeout=45,
-                    context=ssl._create_unverified_context())
-                self.v.connect()
-                self.zertifikat_ungeprueft = True
-        else:
-            self.v = http.client.HTTPConnection(u.netloc, timeout=45)
-            self.v.connect()
-
-    def zu(self):
-        try:
-            self.v.close()
-        except Exception:
-            pass
-
-    def herunter(self, geheimnis, wieviel):
-        """Bytes holen. Zurueck: (gelesen, Sekunden, HTTP-Kode)."""
-        t0 = time.perf_counter()
-        self.v.request(
-            'GET',
-            '%s/relay.php?action=messung&bytes=%d' % (self.pfad, wieviel),
-            headers={'X-AHPT-Auth': geheimnis,
-                     # Ohne das darf der Server komprimieren, und dann misst
-                     # man seine Rechenleistung statt der Leitung.
-                     'Accept-Encoding': 'identity'})
-        r = self.v.getresponse()
-        gelesen = 0
-        while True:
-            s = r.read(65536)
-            if not s:
-                break
-            gelesen += len(s)
-        return gelesen, time.perf_counter() - t0, r.status
-
-    def hinauf(self, geheimnis, wieviel):
-        """Bytes schicken. Zurueck: (bestaetigt, Sekunden, HTTP-Kode)."""
-        # os.urandom statt Nullen: Nullen presst jedes mod_deflate auf nichts
-        # zusammen, und die Messung meldete das Zehnfache der Wahrheit.
-        nutzlast = os.urandom(wieviel)
-        t0 = time.perf_counter()
-        self.v.request(
-            'POST', '%s/relay.php?action=messung' % self.pfad, body=nutzlast,
-            headers={'X-AHPT-Auth': geheimnis,
-                     'Content-Type': 'application/octet-stream',
-                     'Content-Length': str(wieviel)})
-        r = self.v.getresponse()
-        roh = r.read()
-        dauer = time.perf_counter() - t0
-        bestaetigt = 0
-        try:
-            bestaetigt = int(json.loads(roh).get('empfangen') or 0)
-        except Exception:
-            pass
-        return bestaetigt, dauer, r.status
+    try:
+        os.makedirs(KONFIG_ORDNER, exist_ok=True)
+        with open(MESS_FENSTER, 'w') as f:
+            f.write('%.3f' % (time.time() + sekunden))
+    except OSError:
+        pass          # ohne Fenster laeuft die Messung trotzdem, nur lauter
 
 
-def _naechste_groesse(bytes_, sekunden, deckel):
-    """Wie gross der naechste Durchgang sein soll, damit er lange genug dauert.
-
-    Ein Durchgang von zwei Zehntelsekunden misst vor allem Zufall. Also aus
-    dem Probelauf hochrechnen, was in MESSUNG_ZIEL_S passt.
-    """
-    if sekunden <= 0:
-        return deckel
-    ziel = int(bytes_ / sekunden * MESSUNG_ZIEL_S)
-    return max(512 * 1024, min(deckel, ziel))
+def _messfenster_zu():
+    try:
+        os.remove(MESS_FENSTER)
+    except OSError:
+        pass
 
 
 def _messungen_lesen():
@@ -864,10 +837,8 @@ def _tempo(bps, kurz=False):
 
     MB/s versteht jeder, der schon einmal eine Datei kopiert hat. Mbit/s
     steht im Vertrag mit dem Anbieter. Wer nur eins zeigt, laesst die Haelfte
-    der Leute rechnen.
-
-    `kurz` fuer Stellen, die selbst schon in einer Klammer stehen -- eine
-    Klammer in der Klammer liest niemand gern.
+    der Leute rechnen. `kurz` fuer Stellen, die selbst schon in einer
+    Klammer stehen.
     """
     if not bps:
         return 'nichts'
@@ -876,30 +847,164 @@ def _tempo(bps, kurz=False):
     return '%.1f Mbit/s (%.2f MB/s)' % (bps * 8 / 1e6, bps / 1048576.0)
 
 
-def _vergleich_mit_frueher(adresse, jetzt_bps):
-    """Ist es langsamer geworden? Zurueck: (Satz oder None, bester Wert)."""
+def _vergleich_mit_frueher(adresse, jetzt_s):
+    """Dauert es laenger als frueher? Zurueck: (Satz oder None, bester Wert).
+
+    Verglichen wird die ARBEIT, nicht der Rundlauf: Im Rundlauf steckt der
+    Zufall des Agent-Takts, und der wuerde den Vergleich verrauschen.
+    """
     frueher = [m for m in _messungen_lesen()
-               if m.get('adresse') == adresse and m.get('herunter_bps')]
-    if len(frueher) < 2 or not jetzt_bps:
+               if m.get('adresse') == adresse and m.get('arbeit_s')]
+    if len(frueher) < 2 or not jetzt_s:
         return None, None
-    best = max(m['herunter_bps'] for m in frueher)
-    if jetzt_bps < best * 0.4:
-        return ('Derselbe Vermittler schaffte hier frueher schon %s, jetzt '
-                'sind es %s -- weniger als die Haelfte. Das sieht nach einer '
-                'Drosselung aus, oder der Webspace ist gerade ueberlastet.'
-                % (_tempo(best), _tempo(jetzt_bps))), best
+    best = min(m['arbeit_s'] for m in frueher)
+    if jetzt_s > best * 2.5:
+        return ('Derselbe Vermittler brauchte hier frueher schon %.1f s fuer '
+                'dieselbe Aufgabe, jetzt sind es %.1f s -- mehr als das '
+                'Doppelte. Das sieht nach einer Drosselung aus, oder der '
+                'Webspace ist gerade ueberlastet.' % (best, jetzt_s)), best
     return None, best
 
 
-def vermittler_messen(adresse=None, melde=None, deckel=MESSUNG_MAX):
-    """Misst einen Vermittler und faellt ein Urteil.
+def _rundlauf(basis, geheimnis, groesse, sag):
+    """Ein vollstaendiger AHPT-Vorgang, in seine Abschnitte zerlegt.
+
+    Zurueck kommt ein Wortverzeichnis mit den Zeiten. Wirft nichts -- ein
+    Fehlschlag steht als `fehler` darin, damit die Teilergebnisse davor
+    nicht verlorengehen.
+    """
+    import netz
+    e = {'datei_bytes': groesse}
+
+    # Was der Agent ablegen wuerde: Base64 des verschluesselten Inhalts.
+    # Die Aufblaehung um ein Drittel gehoert zur Wahrheit -- sie geht ueber
+    # dieselbe Leitung wie die Nutzdaten und kostet dieselbe Zeit.
+    nutz = base64.b64encode(os.urandom(groesse)).decode('ascii')
+    stuecke = [nutz[i:i + MESS_STUECK] for i in range(0, len(nutz), MESS_STUECK)]
+    e['leitung_bytes'] = len(nutz)
+    e['stuecke'] = len(stuecke)
+    if len(stuecke) > 250:
+        e['fehler'] = ('%d Stuecke -- mehr als der Vermittler zulaesst (250). '
+                       'Kleinere Testdatei waehlen.' % len(stuecke))
+        return e
+
+    # Fuellstoff fuer die Frage. Muss wie eine Noise-Nachricht aussehen
+    # (Base64, mindestens 32 Byte), damit sie dieselben Pruefungen
+    # durchlaeuft wie eine echte -- entschluesseln kann sie niemand.
+    fuellstoff = base64.b64encode(os.urandom(96)).decode('ascii')
+
+    _messfenster(120)
+    marke = None
+    try:
+        # ---- 1. Frage ablegen (Client-Rolle)
+        sag('Frage ablegen ...')
+        t0 = time.perf_counter()
+        code, d = netz.sende_json(
+            basis + '/relay.php?action=frage',
+            {'v': 1, 'krypto': 'noise_ik', 'teile': 1,
+             'nutzlast': {'chiffre': fuellstoff}}, geheimnis)
+        e['frage_s'] = time.perf_counter() - t0
+        if code != 200 or not d.get('ok'):
+            e['fehler'] = ('Der Vermittler nimmt keine Frage an (HTTP %s, %s). '
+                           % (code, d.get('fehler', 'ohne Begruendung')))
+            return e
+        marke = d.get('marke', '')
+
+        # ---- 2. Warteschlange und Frage abholen (Agent-Rolle)
+        #
+        # Statisch, ohne PHP -- genau so holt der Agent seine Arbeit ab.
+        # netz.hole gibt (Kode, Koerper, ETag) zurueck; Kode 0 heisst "gar
+        # keine Antwort" und ist absichtlich von einem HTTP-Fehler
+        # unterschieden.
+        sag('Frage abholen ...')
+        t0 = time.perf_counter()
+        netz.hole(basis + '/ahpt/warteschlange.json')
+        netz.hole(basis + '/ahpt/frage_%s.json' % marke)
+        e['aufnehmen_s'] = time.perf_counter() - t0
+
+        # ---- 3. Stuecke ablegen (Agent-Rolle)
+        sag('%d Stuecke ablegen ...' % len(stuecke))
+        t0 = time.perf_counter()
+        for i, s in enumerate(stuecke):
+            code, d = netz.sende_json(
+                basis + '/relay.php?action=stueck',
+                {'v': 1, 'krypto': 'noise_ik', 'marke': marke,
+                 'teil': i, 'teile': len(stuecke), 'nutzlast': s}, geheimnis)
+            if code != 200 or not d.get('ok'):
+                e['ablegen_s'] = time.perf_counter() - t0
+                e['fehler'] = ('Stueck %d von %d abgewiesen (HTTP %s, %s).'
+                               % (i + 1, len(stuecke), code,
+                                  d.get('fehler', 'ohne Begruendung')))
+                return e
+        e['ablegen_s'] = time.perf_counter() - t0
+
+        # ---- 4. Antwort ablegen (Agent-Rolle)
+        t0 = time.perf_counter()
+        code, d = netz.sende_json(
+            basis + '/relay.php?action=antwort',
+            {'v': 1, 'krypto': 'noise_ik', 'marke': marke,
+             'teile': len(stuecke), 'nutzlast': {'chiffre': ''}}, geheimnis)
+        e['fertigmelden_s'] = time.perf_counter() - t0
+        if code != 200 or not d.get('ok'):
+            e['fehler'] = ('Die Antwort wurde abgewiesen (HTTP %s, %s).'
+                           % (code, d.get('fehler', 'ohne Begruendung')))
+            return e
+
+        # ---- 5./6. Zurueckholen (Client-Rolle), alles statisch
+        sag('%d Stuecke zurueckholen ...' % len(stuecke))
+        t0 = time.perf_counter()
+        netz.hole(basis + '/ahpt/warteschlange.json')
+        e['abruf_s'] = time.perf_counter() - t0      # Dauer EINES Abrufs
+        _, roh, _ = netz.hole(basis + '/ahpt/antwort_%s.json' % marke)
+
+        # Die Namen der Stuecke stehen IN der Antwort -- sie werden nicht
+        # geraten. Der Vermittler haengt vier Zeichen aus einem Streuwert an
+        # (stueck_name() in relay.php), damit ein Fremder sie nicht der
+        # Reihe nach abklappern kann. Genau so macht es auch der echte
+        # Client (ahpt_client.py::_stuecke, portal/ahpt.js).
+        try:
+            umschlag = json.loads(roh.decode('utf-8', 'replace'))
+            liste = (umschlag.get('nutzlast') or {}).get('stuecke') or []
+        except (ValueError, AttributeError):
+            liste = []
+        zurueck, fehlend = 0, 0
+        for eintrag in liste:
+            datei = eintrag.get('datei', '') if isinstance(eintrag, dict) else ''
+            if not datei.startswith('antwort_'):
+                fehlend += 1
+                continue
+            kode, koerper, _ = netz.hole('%s/ahpt/%s' % (basis, datei))
+            if kode == 200:
+                zurueck += len(koerper)
+            else:
+                fehlend += 1
+        e['abholen_s'] = time.perf_counter() - t0
+        e['zurueck_bytes'] = zurueck
+        if fehlend or len(liste) != len(stuecke):
+            e['fehler'] = (
+                'Von %d abgelegten Stuecken kamen %d zurueck. Der Vermittler '
+                'nimmt sie an und gibt sie nicht wieder heraus -- meist ist '
+                'die Ablage voll oder ein Aufraeumer greift zu frueh zu.'
+                % (len(stuecke), len(liste) - fehlend))
+    finally:
+        _messfenster_zu()
+
+    e['marke'] = marke
+    e['arbeit_s'] = sum(e.get(k, 0.0) for k in
+                        ('frage_s', 'aufnehmen_s', 'ablegen_s',
+                         'fertigmelden_s', 'abholen_s'))
+    return e
+
+
+def vermittler_messen(adresse=None, melde=None, groesse=MESS_DATEI):
+    """Misst einen Rundlauf und faellt ein Urteil.
 
     `melde` bekommt kurze Saetze zum Fortschritt -- eine Messung dauert um
     die zehn Sekunden, und ein Fenster, das so lange nichts sagt, sieht
     abgestuerzt aus.
 
     Die Reihenfolge ist Absicht: erst der billigste Test, dann der teuerste.
-    Wer schon beim Verbindungsaufbau scheitert, soll nicht erst acht Megabyte
+    Wer schon beim Verbindungsaufbau scheitert, soll nicht erst ein Megabyte
     lang darauf warten, dass es auch weiterhin nicht geht.
     """
     def sag(t):
@@ -952,124 +1057,75 @@ def vermittler_messen(adresse=None, melde=None, deckel=MESSUNG_MAX):
             % (e['tcp_ms'], basis))
         return e
     e['umlauf_ms'] = min(umlaeufe)
-    e['umlauf_mittel_ms'] = sum(umlaeufe) / len(umlaeufe)
     # Schwankung eigens ausweisen: Ein Wert, der zwischen 80 und 2000 ms
     # springt, ist ein ueberbuchter Server -- am Mittelwert allein sieht man
     # davon nichts.
     e['umlauf_streuung_ms'] = max(umlaeufe) - min(umlaeufe)
-    # Nur aufteilen, wenn die Aufteilung ueberhaupt aufgeht. Beide Werte
-    # stammen aus verschiedenen Messreihen; auf einer schwankenden Leitung
-    # kann der Umlauf zufaellig unter dem TCP-Wert landen. Dann ist ein
-    # errechneter PHP-Anteil von "0,0 ms" keine Auskunft, sondern eine
-    # erfundene -- also lieber keine.
+    # Nur aufteilen, wenn die Aufteilung aufgeht. Beide Werte stammen aus
+    # verschiedenen Messreihen; auf einer schwankenden Leitung kann der
+    # Umlauf zufaellig unter dem TCP-Wert landen. Dann ist ein errechneter
+    # PHP-Anteil von "0,0 ms" keine Auskunft, sondern eine erfundene.
     e['php_ms'] = (e['umlauf_ms'] - e['tcp_ms']
                    if e['umlauf_ms'] > e['tcp_ms'] else None)
 
     if selbsttest and not selbsttest.get('ablage_schreib', True):
-        e['hinweise'].append(
-            'Der Vermittler darf in seinen Ablage-Ordner nicht schreiben. '
-            'Damit uebertraegt AHPT gar nichts, egal wie schnell die Leitung '
-            'ist. Die Rechte des Ordners ahpt/ pruefen.')
+        e['verdikt'] = 'krank'
+        e['gesamt_s'] = time.perf_counter() - gestartet
+        e['saetze'].append(
+            'Der Vermittler antwortet, darf aber in seinen Ablage-Ordner '
+            'nicht schreiben. Damit uebertraegt AHPT gar nichts, egal wie '
+            'schnell die Leitung ist. Die Rechte des Ordners ahpt/ pruefen.')
+        return e
     if selbsttest and selbsttest.get('verdraengt'):
         e['hinweise'].append(
             'Die Warteschlange musste schon %d mal einen Platz verdraengen. '
             'Entweder holt der Agent zu selten ab, oder jemand von aussen '
             'belegt Plaetze.' % selbsttest['verdraengt'])
 
-    # Kann dieser Vermittler ueberhaupt messen? Der Selbsttest sagt es. Bei
-    # einem aelteren fehlt das Feld -- dann ist der Fehlschlag weiter unten
-    # kein Defekt, sondern nur ein alter Stand, und das soll dastehen.
-    kann_messen = bool(selbsttest and selbsttest.get('messung_max'))
-    if kann_messen:
-        deckel = min(deckel, int(selbsttest['messung_max']))
-
-    verbindung = None
-    try:
-        verbindung = _Messverbindung(basis)
-        if verbindung.zertifikat_ungeprueft:
-            e['hinweise'].append(
-                'Das TLS-Zertifikat dieses Webspace liess sich nicht pruefen '
-                '(selbstsigniert). Gemessen wurde trotzdem.')
-
-        # ---- 3. Herunter
-        sag('Herunterladen messen ...')
-        n, s, kode = verbindung.herunter(geheimnis, 256 * 1024)
-        if kode == 403:
-            e['hinweise'].append(
-                'Der Vermittler weist die Messung ab: Sein Geheimnis ist ein '
-                'anderes als das hier hinterlegte. Bei einem FREMDEN '
-                'Vermittler ist das der Normalfall -- dann lassen sich nur '
-                'Erreichbarkeit und Umlauf messen, nicht das Tempo.')
-        elif kode != 200 or not kann_messen:
-            e['hinweise'].append(
-                'Dieser Vermittler kennt die Messung noch nicht -- er ist '
-                'aelter als diese Fassung. Im Schritt "Vermittler" neu '
-                'hochladen, danach geht es.')
-        else:
-            gross = _naechste_groesse(n, s, deckel)
-            n2, s2, kode2 = verbindung.herunter(geheimnis, gross)
-            if kode2 == 200 and n2 and s2 > 0:
-                e['herunter_bps'] = n2 / s2
-                e['herunter_bytes'] = n2
-                e['herunter_s'] = s2
-
-            # ---- 4. Hinauf
-            sag('Hochladen messen ...')
-            n3, s3, kode3 = verbindung.hinauf(geheimnis, 256 * 1024)
-            if kode3 == 200 and n3 and s3 > 0:
-                gross = _naechste_groesse(n3, s3, deckel)
-                n4, s4, kode4 = verbindung.hinauf(geheimnis, gross)
-                if kode4 == 200 and n4 and s4 > 0:
-                    e['hinauf_bps'] = n4 / s4
-                    e['hinauf_bytes'] = n4
-                    e['hinauf_s'] = s4
-                    if n4 < gross:
-                        # post_max_size schneidet still ab. Ohne diesen Satz
-                        # sieht das nach einer langsamen Leitung aus.
-                        e['hinweise'].append(
-                            'Der Vermittler hat nur %d von %d gesendeten '
-                            'Bytes angenommen. Der Hoster begrenzt die '
-                            'Rumpfgroesse (post_max_size) -- grosse Dateien '
-                            'muss AHPT dort feiner stueckeln.' % (n4, gross))
-    except (OSError, http.client.HTTPException) as ex:
-        e['hinweise'].append(
-            'Die Messung brach ab: %s. Was oben steht, ist das, was bis '
-            'dahin zustande kam.' % ex)
-    finally:
-        if verbindung:
-            verbindung.zu()
-
+    # ---- 3. Der Rundlauf
+    e.update(_rundlauf(basis, geheimnis, groesse, sag))
     e['gesamt_s'] = time.perf_counter() - gestartet
 
-    # ---- 5. Urteil
-    langsam_satz, best = _vergleich_mit_frueher(basis, e.get('herunter_bps'))
-    e['frueher_bester_bps'] = best
-    schreibt = not (selbsttest and not selbsttest.get('ablage_schreib', True))
-    if not schreibt:
+    if e.get('fehler'):
         e['verdikt'] = 'krank'
-    elif langsam_satz:
+        e['saetze'].append(e['fehler'])
+        return e
+
+    # ---- 4. Die zwei Wartezeiten dazurechnen, aber getrennt ausweisen
+    takt = _agent_takt()
+    e['agent_takt_s'] = takt
+    e['warten_agent_s'] = takt / 2.0            # Mittel; hoechstens ein Takt
+    bis_bereit = (e['frage_s'] + e['warten_agent_s'] + e['aufnehmen_s']
+                  + e['ablegen_s'] + e['fertigmelden_s'])
+    e['warten_client_s'] = _client_wartezeit(bis_bereit, e.get('abruf_s', 0.1))
+    e['rundlauf_s'] = (e['arbeit_s'] + e['warten_agent_s']
+                       + e['warten_client_s'])
+    if e['arbeit_s'] > 0:
+        # Durchsatz auf die ARBEIT bezogen, nicht auf den Rundlauf: Warten
+        # ist keine Uebertragung, und wer es einrechnet, macht aus einem
+        # gemuetlichen Abfragetakt eine langsame Leitung.
+        e['durchsatz_bps'] = (e['leitung_bytes'] * 2) / e['arbeit_s']
+
+    # ---- 5. Urteil
+    langsam_satz, best = _vergleich_mit_frueher(basis, e['arbeit_s'])
+    e['frueher_beste_arbeit_s'] = best
+    if langsam_satz:
         e['verdikt'] = 'gedrosselt'
         e['saetze'].append(langsam_satz)
-    elif e.get('herunter_bps') and e['herunter_bps'] < 200 * 1024:
+    elif e['arbeit_s'] > 25:
         e['verdikt'] = 'lahm'
         e['saetze'].append(
-            'Mit %s ist AHPT zwar benutzbar, aber langsam: Fuer 10 MB gehen '
-            'rund %.0f Sekunden drauf -- und das zweimal, weil jede Datei '
-            'erst hinauf und dann herunter muss.'
-            % (_tempo(e['herunter_bps']), 10 * 1048576 / e['herunter_bps']))
+            'Fuer %.1f MB hin und zurueck braucht dieser Vermittler %.0f '
+            'Sekunden. AHPT ist damit benutzbar, aber zaeh -- eine Datei von '
+            '10 MB dauert rund %.0f Minuten.'
+            % (e['datei_bytes'] / 1048576.0, e['arbeit_s'],
+               e['arbeit_s'] * (10 * 1048576 / e['datei_bytes']) / 60))
     elif e['umlauf_ms'] > 1500:
         e['verdikt'] = 'lahm'
         e['saetze'].append(
             'Die Leitung ist in Ordnung, aber der Vermittler selbst braucht '
-            '%.0f ms je Anfrage. Der Agent fragt mehrmals je Sekunde nach -- '
-            'AHPT fuehlt sich dadurch traege an, auch wenn Bandbreite genug '
-            'da ist.' % e['umlauf_ms'])
-    elif not e.get('herunter_bps') and not e.get('hinauf_bps'):
-        # "Gut" waere hier gelogen: Erreichbar ist er, aber ueber sein
-        # Tempo ist nichts bekannt -- und daneben stuenden leere Felder.
-        # Eine Oberflaeche, die "in Ordnung" meldet und nichts anzeigt,
-        # laesst den Nutzer glauben, das Werkzeug sei kaputt.
-        e['verdikt'] = 'teilweise'
+            '%.0f ms je Anfrage. Bei %d Stuecken je Datei summiert sich das.'
+            % (e['umlauf_ms'], e['stuecke']))
     else:
         e['verdikt'] = 'gut'
 
@@ -1086,10 +1142,9 @@ def vermittler_messen(adresse=None, melde=None, deckel=MESSUNG_MAX):
             'mal wartet man.'
             % (e['umlauf_ms'], e['umlauf_ms'] + e['umlauf_streuung_ms']))
 
-    if e.get('herunter_bps') or e.get('hinauf_bps'):
-        _messung_merken({k: e.get(k) for k in
-                         ('adresse', 'zeit', 'tcp_ms', 'umlauf_ms',
-                          'herunter_bps', 'hinauf_bps')})
+    _messung_merken({k: e.get(k) for k in
+                     ('adresse', 'zeit', 'tcp_ms', 'umlauf_ms', 'arbeit_s',
+                      'rundlauf_s', 'durchsatz_bps', 'datei_bytes')})
     return e
 
 

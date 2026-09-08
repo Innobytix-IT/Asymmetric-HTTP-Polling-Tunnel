@@ -278,9 +278,10 @@ def main():
 
         tk.Label(r, text='Vermittler pruefen', bg=GRUND, fg=AKZENT,
                  font=SCHRIFT_GROSS, anchor='w').pack(fill='x')
-        tk.Label(r, text='Wie ein Speedtest, nur fuer den Webspace, ueber den '
-                         'AHPT laeuft: Antwortet er noch, wie flott, und ist '
-                         'er noch so schnell wie beim letzten Mal.',
+        tk.Label(r, text='Der Vermittler bekommt genau die Aufgabe, die er im '
+                         'Betrieb bekommt: eine Datei annehmen und wieder '
+                         'herausgeben. Gemessen wird, wie lange er dafuer '
+                         'braucht -- und ob das mehr ist als beim letzten Mal.',
                  bg=GRUND, fg=LEISE, font=SCHRIFT, anchor='w', justify='left',
                  wraplength=560).pack(fill='x', pady=(6, 14))
 
@@ -307,10 +308,10 @@ def main():
         tafel.pack(fill='x', pady=(12, 0))
         felder = {}
         for spalte, (kennung, titel, unten) in enumerate((
-            ('umlauf', 'Umlauf', 'Frage und Antwort'),
-            ('herunter', 'Herunter', 'vom Webspace'),
-            ('hinauf', 'Hinauf', 'zum Webspace'),
-            ('gesamt', 'Dauer', 'ganze Pruefung'),
+            ('rundlauf', 'Rundlauf', '1 MB hin und zurueck'),
+            ('arbeit', 'Arbeit', 'Ablegen + Abholen'),
+            ('warten', 'Warten', 'auf die Abfragetakte'),
+            ('umlauf', 'Umlauf', 'eine Anfrage'),
         )):
             tafel.columnconfigure(spalte, weight=1, uniform='messwerte')
             k = tk.Frame(tafel, bg=FLAECHE, padx=10, pady=10)
@@ -355,16 +356,14 @@ def main():
         def fertig(e):
             los.configure(state='normal', text='Nochmal messen')
             farben = {'gut': AKZENT, 'lahm': WARN, 'gedrosselt': WARN,
-                      'teilweise': WARN, 'krank': FEHLER, 'weg': FEHLER}
+                      'krank': FEHLER, 'weg': FEHLER}
             koepfe = {
                 'gut': 'Der Vermittler ist in Ordnung.',
                 'lahm': 'Der Vermittler antwortet, aber langsam.',
                 'gedrosselt': 'Der Vermittler ist deutlich langsamer als '
                               'frueher.',
-                'krank': 'Der Vermittler antwortet, kann aber nicht '
-                         'arbeiten.',
-                'teilweise': 'Der Vermittler antwortet, aber sein Tempo '
-                             'liess sich nicht messen.',
+                'krank': 'Der Vermittler antwortet, aber die Aufgabe ist '
+                         'nicht durchgelaufen.',
                 'weg': 'Der Vermittler ist nicht erreichbar.',
             }
             v = e.get('verdikt', 'weg')
@@ -374,7 +373,22 @@ def main():
                 felder[kennung][0].configure(text=gross)
                 felder[kennung][1].configure(text=klein)
 
-
+            if e.get('rundlauf_s'):
+                setz('rundlauf', '%.1f s' % e['rundlauf_s'],
+                     '%.1f MB Datei' % (e.get('datei_bytes', 0) / 1048576.0))
+            if e.get('arbeit_s'):
+                setz('arbeit', '%.1f s' % e['arbeit_s'],
+                     '%d Stuecke, %s'
+                     % (e.get('stuecke', 0),
+                        einrichten._tempo(e.get('durchsatz_bps'), kurz=True)))
+            if e.get('warten_agent_s') is not None:
+                # Die zwei Wartezeiten getrennt benennen -- es sind zwei
+                # verschiedene Takte, und nur der des Agenten laesst sich
+                # ueberhaupt einstellen.
+                setz('warten',
+                     '%.1f s' % (e['warten_agent_s'] + e['warten_client_s']),
+                     'Agent %.1f + Client %.1f'
+                     % (e['warten_agent_s'], e['warten_client_s']))
             if 'umlauf_ms' in e:
                 # Die Aufteilung nur zeigen, wenn sie aufgeht -- siehe
                 # vermittler_messen(). Sonst nur der Gesamtwert; er ist der,
@@ -383,16 +397,6 @@ def main():
                      ('Netz %.1f + PHP %.1f'
                       % (e.get('tcp_ms') or 0, e['php_ms']))
                      if e.get('php_ms') else 'Netz und PHP zusammen')
-            if e.get('herunter_bps'):
-                setz('herunter', '%.1f Mbit/s' % (e['herunter_bps'] * 8 / 1e6),
-                     '%.2f MB/s' % (e['herunter_bps'] / 1048576.0))
-            if e.get('hinauf_bps'):
-                setz('hinauf', '%.1f Mbit/s' % (e['hinauf_bps'] * 8 / 1e6),
-                     '%.2f MB/s' % (e['hinauf_bps'] / 1048576.0))
-            setz('gesamt', '%.1f s' % e.get('gesamt_s', 0),
-                 '%.1f MB bewegt'
-                 % ((e.get('herunter_bytes', 0) + e.get('hinauf_bytes', 0))
-                    / 1048576.0))
 
             zeilen = [(s, 'warn') for s in e.get('saetze', [])]
             zeilen += [(s, 'warn') for s in e.get('hinweise', [])]
@@ -401,22 +405,38 @@ def main():
                 # sieht aus wie ein halb fertiges Programm, nicht wie ein
                 # Ergebnis.
                 zeilen = [(
-                    'Nichts zu beanstanden. Antwortzeit und Tempo sind so, '
-                    'wie sie sein sollen -- laeuft AHPT trotzdem zaeh, liegt '
-                    'es nicht am Webspace.', 'gut')]
-            # Was AHPT davon hat -- die gemessenen Zahlen gelten je Richtung,
-            # und AHPT braucht beide nacheinander. Wer das nicht dazuschreibt,
-            # laesst den Anwender die doppelte Geschwindigkeit erwarten.
-            if e.get('herunter_bps') and e.get('hinauf_bps'):
-                langsamer = min(e['herunter_bps'], e['hinauf_bps'])
+                    'Nichts zu beanstanden. Der Vermittler nimmt eine Datei '
+                    'an und gibt sie in ordentlicher Zeit wieder heraus -- '
+                    'laeuft AHPT trotzdem zaeh, liegt es nicht an ihm.',
+                    'gut')]
+
+            # WAS DIE ZAHL BEDEUTET, muss danebenstehen. Sonst vergleicht
+            # sie jemand mit dem Ergebnis eines DSL-Speedtests und haelt
+            # seinen Webspace fuer kaputt: Der misst eine einzelne lange
+            # Verbindung, hier zerfaellt dieselbe Datei in dutzende Stuecke
+            # mit je einem eigenen Umlauf -- und wird durch Base64 auch noch
+            # um ein Drittel dicker.
+            if e.get('arbeit_s') and e.get('stuecke'):
                 zeilen.append((
-                    'Was das fuer AHPT heisst: Jede Datei geht den Weg '
-                    'zweimal -- der Agent laedt sie hinauf, dein Geraet holt '
-                    'sie herunter. Es zaehlt also die langsamere Richtung '
-                    '(%s). Fuer 10 MB sind das rund %.1f Sekunden, plus die '
-                    'Wartezeit zwischen den Abfragen.'
-                    % (einrichten._tempo(langsamer, kurz=True),
-                       2 * 10 * 1048576 / langsamer), 'gut'))
+                    'Gemessen wird ein ECHTER Vorgang, kein Bandbreitentest: '
+                    'Aus %.1f MB Datei werden durch Base64 %.1f MB auf der '
+                    'Leitung, zerlegt in %d Stuecke mit je einem eigenen '
+                    'Umlauf. Deshalb liegt der Wert weit unter dem, was ein '
+                    'DSL-Speedtest derselben Leitung zeigt -- und deshalb '
+                    'ist er der richtige.'
+                    % (e.get('datei_bytes', 0) / 1048576.0,
+                       e.get('leitung_bytes', 0) / 1048576.0,
+                       e['stuecke']), 'gut'))
+                zeilen.append((
+                    'Hochgerechnet: eine Datei von 10 MB braucht auf diesem '
+                    'Weg rund %.0f Sekunden. Die Wartezeit auf die '
+                    'Abfragetakte (%.1f s) faellt dabei nur EINMAL an, nicht '
+                    'je Megabyte.'
+                    % (e['arbeit_s'] * (10 * 1048576.0 / max(1, e.get(
+                           'datei_bytes', 1))) + e.get('warten_agent_s', 0)
+                       + e.get('warten_client_s', 0),
+                       e.get('warten_agent_s', 0) + e.get('warten_client_s', 0)),
+                    'gut'))
             schreib(zeilen)
 
         def messen():
@@ -425,8 +445,10 @@ def main():
             for wert, klein, ausgang in felder.values():
                 wert.configure(text='--')
                 klein.configure(text=ausgang)
-            schreib([('Die Messung bewegt bis zu 16 MB. Auf einer langsamen '
-                      'Leitung dauert das eine Weile.', 'gut')])
+            schreib([('Es wird eine Datei von 1 MB abgelegt und wieder '
+                      'zurueckgeholt -- genau so, wie AHPT es im Betrieb '
+                      'tut. Auf einer langsamen Leitung dauert das eine '
+                      'Weile.', 'gut')])
             adresse = feld.get().strip()
 
             def lauf():
@@ -454,9 +476,10 @@ def main():
 
             threading.Thread(target=lauf, daemon=True).start()
 
-        schreib([('Auf "Messen" druecken. Der Vermittler wird angesprochen, '
-                  'dann wird in beide Richtungen gemessen -- das dauert etwa '
-                  'zehn Sekunden.', 'gut')])
+        schreib([('Auf "Messen" druecken. Es laeuft ein vollstaendiger '
+                  'AHPT-Vorgang: eine Datei wird abgelegt und wieder '
+                  'abgeholt, und dabei wird gestoppt, wie lange jeder '
+                  'Abschnitt braucht.', 'gut')])
         feld.focus_set()
 
     # ------------------------------------------------- Assistent starten

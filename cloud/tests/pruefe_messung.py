@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-pruefe_messung.py -- die Vermittler-Messung gegen ein echtes PHP fahren
+pruefe_messung.py -- den Rundlauf-Test gegen ein echtes PHP fahren
 
 SPDX-License-Identifier: AGPL-3.0-or-later
 Copyright (C) 2026 Manuel Person, InnoBytix-IT
 
 WOZU
 ----
-Die Messung (relay.php, action=messung) laesst sich nicht sinnvoll
-nachbilden: Sie ist zu grossen Teilen genau das, was PHP und der Webserver
-mit den Bytes machen -- Ausgabepuffer, Komprimierung, Rumpfgrenzen. Eine
-Attrappe wuerde alles davon richtig machen und den Fehler verstecken.
+`vermittler_messen()` in einrichten.py laesst einen vollstaendigen
+AHPT-Vorgang laufen: Frage ablegen, Stuecke ablegen, Antwort ablegen, alles
+statisch wieder abholen. Das laesst sich nicht sinnvoll nachbilden -- die
+Zeit steckt zu grossen Teilen genau in dem, was PHP und der Webserver mit
+den Stuecken machen. Eine Attrappe wuerde all das richtig machen und den
+Fehler verstecken.
 
 Also ein echter PHP-Prozess (`php -S`) mit einem WEGWERF-Vermittler in einem
 temporaeren Ordner. Die eingerichtete Anlage des Nutzers wird nicht
 angefasst; das Geheimnis dieses Tests entsteht hier und stirbt hier.
 
-WAS DIESER TEST GEFUNDEN HAT
------------------------------
-Beim ersten Durchlauf am 08.09.2026 kam mit dem RICHTIGEN Geheimnis ein 403
-zurueck. Die Ursache lag nicht in der Messung, sondern in einrichten.py: Es
-schrieb relay_token.php als `<?php return "<geheimnis>";` -- eine Datei ohne
-Zeilenschaltung, aus der lies_geschuetzt() in relay.php immer eine leere
-Zeichenkette macht. Damit war agent_erlaubt() dauerhaft falsch und der Agent
-durfte auf dem Vermittler nichts ablegen: JEDE ueber den Assistenten
-eingerichtete Anlage haette auf jede Frage nie eine Antwort bekommen.
+WAS DIESER TEST SCHON GEFUNDEN HAT
+-----------------------------------
+Am 08.09.2026, in seiner ersten Fassung: Mit dem RICHTIGEN Geheimnis kam ein
+403 zurueck. Die Ursache lag nicht in der Messung, sondern in einrichten.py
+-- es schrieb relay_token.php als `<?php return "<geheimnis>";`, eine Datei
+ohne Zeilenschaltung, aus der lies_geschuetzt() in relay.php immer eine
+leere Zeichenkette macht. agent_erlaubt() war dauerhaft falsch: JEDE ueber
+den Assistenten eingerichtete Anlage haette auf jede Frage nie eine Antwort
+bekommen.
 
 Deshalb baut dieser Test die beiden Dateien mit den ECHTEN Erzeugern aus
 einrichten.py und nicht mit einer eigenen, gut gemeinten Nachbildung. Eine
@@ -35,7 +37,6 @@ Aufruf:
     python3 tests/pruefe_messung.py
 """
 
-import json
 import os
 import shutil
 import signal
@@ -58,15 +59,51 @@ def pruefe(bedingung, text):
         fehler.append(text)
 
 
-def main():
-    if shutil.which('php') is None:
-        print('PHP fehlt -- dieser Test braucht es und kann ohne nichts sagen.')
-        print('Debian/Ubuntu/Mint:  sudo apt install php-cli')
-        return 77          # wie bei automake: uebersprungen, nicht bestanden
+def pruefe_ohne_php(einrichten):
+    """Was sich ohne laufenden Webspace pruefen laesst.
 
+    Der Fahrplan der Clients ist reine Rechnerei -- und gerade deshalb muss
+    er stimmen: Er geht als "Warten (Client)" in das Ergebnis ein, ohne dass
+    ihn irgendetwas nachmisst.
+    """
+    print('== 1. Der Vermittler ist wieder dumm')
+    with open(os.path.join(QUELLE, 'relay.php'), encoding='utf-8') as f:
+        relay = f.read()
+    # Die erste Fassung dieses Werkzeugs hatte eine eigene Aktion im
+    # Vermittler. Sie ist weg, und sie soll wegbleiben: Der Rundlauf
+    # braucht keinen einzigen Aufruf, den es nicht ohnehin gaebe.
+    pruefe('messung' not in relay,
+           'relay.php kennt keine eigene Mess-Aktion')
+
+    print('== 2. Der Fahrplan der Clients')
+    # 350 ms, dann mal 1,3, gedeckelt bei 1500 -- so steht es in
+    # portal/ahpt.js und in Protokoll.kt. Der erste Abruf faellt auf t = 0.
+    w = einrichten._client_wartezeit
+    pruefe(abs(w(0.0, 0.0)) < 1e-9,
+           'Antwort sofort da -> gar kein Warten (%.3f s)' % w(0.0, 0.0))
+    # Abrufe bei 0, 0.350, 0.805, 1.396, 2.164 ...
+    pruefe(abs(w(0.2, 0.0) - 0.150) < 1e-6,
+           'bereit nach 0.2 s -> Abruf bei 0.350, also 0.150 s Warten')
+    pruefe(abs(w(0.9, 0.0) - 0.496) < 1e-3,
+           'bereit nach 0.9 s -> Abruf bei 1.396, also 0.496 s Warten')
+    pruefe(w(30.0, 0.0) <= 1.5 + 1e-6,
+           'nach langem Lauf hoechstens der Deckel von 1.5 s (%.3f s)'
+           % w(30.0, 0.0))
+
+
+def main():
     import einrichten
 
+    pruefe_ohne_php(einrichten)
+
+    if shutil.which('php') is None:
+        print()
+        print('PHP fehlt -- der Rundlauf braucht es und kann ohne nichts sagen.')
+        print('Debian/Ubuntu/Mint:  sudo apt install php-cli')
+        return 77 if not fehler else 1
+
     tmp = tempfile.mkdtemp(prefix='ahpt_messung_')
+    heim = tempfile.mkdtemp(prefix='ahpt_heim_')
     php = None
     try:
         shutil.copy(os.path.join(QUELLE, 'relay.php'), tmp)
@@ -82,67 +119,65 @@ def main():
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1.5)
 
-        # Das Geheimnis dieses Tests statt des eingerichteten -- sonst wuerde
-        # der Test die Anlage des Nutzers voraussetzen und ohne sie scheitern.
+        # Eigenes Zuhause: Das Geheimnis dieses Tests statt des
+        # eingerichteten, und der Verlauf soll nicht in den echten laufen.
+        einrichten.KONFIG_ORDNER = heim
+        einrichten.MESSUNG_DATEI = os.path.join(heim, 'messungen.json')
+        einrichten.MESS_FENSTER = os.path.join(heim, 'messung_laeuft')
         einrichten._geheimnis_lesen = lambda: geheim
         basis = 'http://127.0.0.1:%d' % PORT
 
-        print('== 1. Der Selbsttest verraet, dass es die Messung gibt')
-        st = einrichten._relay_selbsttest(basis)
-        pruefe(st is not None and st.get('ok'), 'relay.php antwortet')
-        pruefe(bool(st and st.get('messung_max')),
-               'messung_max steht im Selbsttest (%s)'
-               % (st or {}).get('messung_max'))
-
-        print('== 2. Ohne das Geheimnis geht nichts')
-        v = einrichten._Messverbindung(basis)
-        _, _, kode = v.herunter('falsch' * 10, 65536)
-        pruefe(kode == 403, 'falsches Geheimnis -> 403 (war %s)' % kode)
-        v.zu()
-
-        print('== 3. Herunter liefert genau so viele Bytes wie verlangt')
-        v = einrichten._Messverbindung(basis)
-        for wunsch in (1024, 300000, 1048576):
-            n, _, kode = v.herunter(geheim, wunsch)
-            pruefe(kode == 200 and n == wunsch,
-                   '%d verlangt, %d bekommen (HTTP %s)' % (wunsch, n, kode))
-
-        print('== 4. Der Deckel greift')
-        n, _, kode = v.herunter(geheim, 99 * 1024 * 1024)
-        pruefe(kode == 200 and n == einrichten.MESSUNG_MAX,
-               'ueber dem Deckel -> genau MESSUNG_MAX (%d bekommen)' % n)
-
-        print('== 5. Hinauf zaehlt richtig')
-        for wunsch in (65536, 700000):
-            n, _, kode = v.hinauf(geheim, wunsch)
-            pruefe(kode == 200 and n == wunsch,
-                   '%d gesendet, %d bestaetigt (HTTP %s)' % (wunsch, n, kode))
-        v.zu()
-
-        print('== 6. Die Messung hinterlaesst nichts in der Ablage')
-        # Sonst wuerde sie das Aufraeumen mitmessen und der Warteschlange
-        # Plaetze wegnehmen -- eine Diagnose, die den Patienten belastet.
-        da = os.listdir(os.path.join(tmp, 'ahpt'))
-        pruefe(da == [], 'Ablage leer geblieben (%r)' % (da,))
-
-        print('== 7. Ein ganzer Durchlauf')
+        print('== 3. Ein vollstaendiger Rundlauf')
         verlauf = []
-        e = einrichten.vermittler_messen(basis, melde=verlauf.append)
+        e = einrichten.vermittler_messen(basis, melde=verlauf.append,
+                                         groesse=256 * 1024)
+        pruefe(not e.get('fehler'),
+               'ohne Abbruch (%s)' % (e.get('fehler') or 'nichts'))
         pruefe(e['verdikt'] in ('gut', 'lahm'), 'Verdikt: %s' % e['verdikt'])
-        pruefe(e.get('herunter_bps', 0) > 0,
-               'Herunter: %s' % einrichten._tempo(e.get('herunter_bps')))
-        pruefe(e.get('hinauf_bps', 0) > 0,
-               'Hinauf:   %s' % einrichten._tempo(e.get('hinauf_bps')))
-        pruefe(e.get('tcp_ms') is not None,
-               'TCP:      %.1f ms' % (e.get('tcp_ms') or -1))
-        pruefe('umlauf_ms' in e, 'Umlauf:   %.1f ms, davon PHP %.1f ms'
-               % (e.get('umlauf_ms', -1), e.get('php_ms', -1)))
-        pruefe(e.get('gesamt_s', 0) > 0,
-               'Gesamt:   %.2f s' % e.get('gesamt_s', 0))
-        pruefe(len(verlauf) >= 4,
-               'vier Fortschrittsmeldungen (%d)' % len(verlauf))
-        pruefe(not e['hinweise'],
-               'keine Beanstandung: %r' % (e['hinweise'],))
+
+        print('== 4. Die Zahlen sind plausibel')
+        # Base64 blaeht um genau ein Drittel auf. Kommt etwas anderes
+        # heraus, wurde nicht das gemessen, was der Agent wirklich schickt.
+        soll = 256 * 1024 * 4 / 3
+        pruefe(abs(e['leitung_bytes'] - soll) < 8,
+               'Base64: %d Byte Datei -> %d Byte Leitung (erwartet ~%d)'
+               % (e['datei_bytes'], e['leitung_bytes'], soll))
+        pruefe(e['stuecke'] == 8,
+               '%d Stuecke zu je 48 KiB' % e['stuecke'])
+        # Was abgelegt wurde, muss auch zurueckkommen -- sonst misst der
+        # Test einen halben Vorgang und meldet ihn als ganzen.
+        pruefe(e['zurueck_bytes'] >= e['leitung_bytes'],
+               'zurueckgeholt: %d Byte (abgelegt: %d)'
+               % (e['zurueck_bytes'], e['leitung_bytes']))
+        pruefe(e['arbeit_s'] > 0, 'Arbeit: %.2f s' % e['arbeit_s'])
+        pruefe(e['rundlauf_s'] > e['arbeit_s'],
+               'Rundlauf %.2f s > Arbeit %.2f s (Warten kommt dazu)'
+               % (e['rundlauf_s'], e['arbeit_s']))
+        pruefe(abs(e['rundlauf_s'] - (e['arbeit_s'] + e['warten_agent_s']
+                                      + e['warten_client_s'])) < 1e-6,
+               'Rundlauf = Arbeit + Warten (Agent %.2f + Client %.2f)'
+               % (e['warten_agent_s'], e['warten_client_s']))
+        pruefe(e.get('durchsatz_bps', 0) > 0,
+               'Durchsatz: %s' % einrichten._tempo(e.get('durchsatz_bps')))
+        pruefe(len(verlauf) >= 5,
+               '%d Fortschrittsmeldungen' % len(verlauf))
+
+        print('== 5. Das Messfenster wird wieder geschlossen')
+        # Bleibt es stehen, zaehlt der Agent dauerhaft keine abgewiesenen
+        # Fragen mehr -- und genau darauf soll man sich verlassen koennen.
+        pruefe(not os.path.exists(einrichten.MESS_FENSTER),
+               'messung_laeuft ist weg')
+
+        print('== 6. Die Warteschlange bleibt aufgeraeumt')
+        st = einrichten._relay_selbsttest(basis)
+        pruefe(st is not None and st.get('offen') == 0,
+               'keine offene Marke zurueckgelassen (offen=%s)'
+               % (st or {}).get('offen'))
+
+        print('== 7. Der Verlauf wurde fortgeschrieben')
+        v = einrichten._messungen_lesen()
+        pruefe(len(v) == 1 and v[0].get('arbeit_s'),
+               '%d Eintrag im Verlauf' % len(v))
 
         print('== 8. Ist er weg, sagt die Messung das -- und raet nicht')
         php.send_signal(signal.SIGTERM)
@@ -152,7 +187,7 @@ def main():
         pruefe(e2['verdikt'] == 'weg',
                'Verdikt nach Abschaltung: %s' % e2['verdikt'])
         pruefe(bool(e2['saetze']), 'mit Begruendung: %s'
-               % (e2['saetze'][0][:60] if e2['saetze'] else '(keine)'))
+               % (e2['saetze'][0][:58] if e2['saetze'] else '(keine)'))
     finally:
         if php:
             try:
@@ -160,6 +195,7 @@ def main():
             except OSError:
                 pass
         shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(heim, ignore_errors=True)
 
     print()
     if fehler:

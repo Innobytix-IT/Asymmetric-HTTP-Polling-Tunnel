@@ -132,6 +132,61 @@ def einmal(grund, *t):
         log(*t)
 
 
+# ----------------------------------------------------------- Messfenster
+#
+# WOZU
+# ----
+# Der Rundlauf-Test (einrichten.py) legt eine Frage ab, die NIEMAND
+# entschluesseln kann -- sie ist nur Fuellstoff, damit der Vermittler eine
+# Marke oeffnet, unter der sich Stuecke ablegen und wieder abholen lassen.
+#
+# Ohne diese Datei sieht der laufende Agent genau das, was er sehen soll,
+# wenn ihn jemand angreift: eine undurchsichtige Frage, die er nicht
+# aufbekommt. Er zaehlt `krypto_abgewiesen` hoch -- und dieser Zaehler ist
+# nach der eigenen Zusage im Kopf dieser Datei im gesunden Betrieb NULL.
+# Ein Diagnosewerkzeug, das den Befund faelscht, den es liefern soll, ist
+# schlimmer als keines.
+#
+# WARUM EIN ZEITFENSTER UND NICHT DIE MARKE
+# ------------------------------------------
+# Weil die Marke der VERMITTLER vergibt, nicht der Fragende: Sie steht erst
+# fest, wenn die Frage schon in der Warteschlange liegt. Zwischen dem
+# Ablegen und dem Aufschreiben laege ein Rennen von wenigen Millisekunden
+# gegen einen Abfragetakt von einer Sekunde -- selten verloren, aber eben
+# nicht nie. Das Fenster wird VORHER gesetzt, damit gibt es kein Rennen.
+#
+# WAS DAS FENSTER NICHT TUT
+# --------------------------
+# Es unterdrueckt keine Bearbeitung. Echte Fragen laufen waehrenddessen
+# voellig normal durch -- nur das ZAEHLEN und MELDEN einer nicht
+# entschluesselbaren Frage unterbleibt. Der schlimmste denkbare Preis ist,
+# dass in diesen wenigen Sekunden auch ein echter Fremdversuch ungezaehlt
+# bliebe.
+
+# Der Ort steht NEBEN DER KONFIGURATION, nicht stur unter ~/.ahpt. In der
+# Regel ist das dasselbe -- aber eben nur in der Regel: Wer den Agenten mit
+# `--konfig woanders/agent.toml` startet, haette sonst zwei Seiten, die auf
+# verschiedene Dateien schauen und sich nie treffen. Genau so ist es beim
+# Erproben am 08.09.2026 passiert, und der Zaehler stand danach auf 2 statt
+# auf 1. main() setzt den Wert; die Vorgabe hier gilt nur, falls jemand
+# dieses Modul einbindet, ohne es zu starten.
+MESSFENSTER = os.path.expanduser('~/.ahpt/messung_laeuft')
+
+
+def messung_laeuft():
+    """Laeuft gerade ein Rundlauf-Test dieses Rechners?
+
+    In der Datei steht, bis wann. Ein Ablaufzeitpunkt statt eines blossen
+    Vorhandenseins, weil ein abgestuerztes Messwerkzeug seine Datei sonst
+    liegen laesst -- und dann waere der Zaehler dauerhaft blind.
+    """
+    try:
+        with open(MESSFENSTER) as f:
+            return time.time() < float(f.read().strip())
+    except (OSError, ValueError):
+        return False
+
+
 class KonfigFehler(handler_paket.KonfigFehler):
     pass
 
@@ -858,6 +913,10 @@ class Agent:
             hs = krypto.HandshakeIK(False, PROLOG, self.a.privat, aead=aead)
             klartext = hs.lies_nachricht1(m1)
         except krypto.KryptoFehler:
+            # Waehrend einer Messung ist das der Fuellstoff des eigenen
+            # Rundlauf-Tests, kein Fremder. Siehe Messfenster oben.
+            if messung_laeuft():
+                return None, None
             zaehle('krypto_abgewiesen')
             einmal('krypto-ab',
                    '  Frage nicht entschluesselbar. Entweder war sie nicht '
@@ -1133,6 +1192,11 @@ def main():
     a = ap.parse_args()
 
     try:
+        # Das Messfenster liegt neben der Konfiguration -- siehe oben.
+        global MESSFENSTER
+        MESSFENSTER = os.path.join(
+            os.path.dirname(os.path.abspath(os.path.expanduser(a.konfig))),
+            'messung_laeuft')
         roh, herkunft = lies_konfig(a.konfig)
         aufbau = Aufbau(roh, herkunft)
     except handler_paket.KonfigFehler as e:

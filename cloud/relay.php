@@ -210,13 +210,6 @@ define('MAX_TEILE',       256);    // Stuecke je Antwort  (~12 MiB)
 define('MAX_FRAGE_TEILE', 160);
 define('MAX_RUMPF',     65536);    // Bytes -- harte Grenze fuer jeden Rumpf
 
-// Wieviel eine einzelne Messung hoechstens bewegt -- in jede Richtung.
-// 8 MiB reichen, um auch eine schnelle Leitung ueber mehrere Sekunden zu
-// beschaeftigen; darunter misst man vor allem den Verbindungsaufbau.
-// Nach oben ist es das, was ein Fremder im schlimmsten Fall je Anfrage vom
-// Traffic-Kontingent abzieht -- und deshalb nicht groesser.
-define('MESSUNG_MAX',  8388608);   // Bytes -- 8 MiB
-
 /** Liest eine geschuetzte Datei und wirft die Schutzzeile weg. */
 function lies_geschuetzt(string $pfad): string {
     $roh = @file_get_contents($pfad);
@@ -585,108 +578,6 @@ function umschlag(string $marke, int $teil, int $teile, $nutzlast,
          . '"teile":1,"krypto":"keine","nutzlast":{"gefunden":false,'
          . '"titel":"","quelle":"","inhalt_typ":"text","inhalt":"",'
          . '"grund":"nicht darstellbar"}}';
-}
-
-// ------------------------------------------------------- Durchsatz messen
-//
-// WOZU
-// ----
-// Ein Vermittler kann auf drei Arten unbrauchbar sein, und nur zwei davon
-// sieht man am Selbsttest: Er kann WEG sein (dann antwortet nichts), er kann
-// stehen und nicht mehr schreiben duerfen (das sagt der Selbsttest), oder er
-// kann noch tadellos antworten und dabei so langsam geworden sein, dass AHPT
-// unbenutzbar ist. Der dritte Fall ist bei kostenlosem Webspace der
-// haeufigste -- gedrosselt, ueberbucht, oder der Anbieter hat den Vertrag
-// stillschweigend eingekuerzt -- und von aussen ist er NICHT zu sehen: Die
-// Startseite laedt, der Selbsttest sagt "ok", und trotzdem braucht eine
-// Datei zehn Minuten. Wer das nicht messen kann, sucht den Fehler bei sich.
-//
-// Diese Aktion misst deshalb, was durch die Leitung passt -- einmal in jede
-// Richtung, denn AHPT braucht beide: Was von zu Hause kommt, muss der Agent
-// erst HERAUFladen, bevor das Handy es HERUNTERladen kann.
-//
-// SIE SCHREIBT NICHTS
-// -------------------
-// Keine Ablage, keine Sperre, kein Zustand. Gemessen wird die Leitung, nicht
-// die Festplatte -- eine Messung, die nebenbei Dateien anlegt, misst das
-// Aufraeumen mit und laesst Muell in der Warteschlange zurueck.
-//
-// WARUM SIE DAS GEHEIMNIS VERLANGT
-// ---------------------------------
-// Ohne Anmeldung waere das ein Verstaerker: 200 Byte Anfrage, 8 MiB Antwort.
-// Wer die Adresse kennt, koennte damit im Dauerlauf das Traffic-Kontingent
-// des Webspace leeren -- und genau dieses Kontingent ist bei kostenlosen
-// Anbietern das, was zuerst reisst. Dieselbe Ueberlegung, die den
-// Fingerabdruck des Geheimnisses aus dem Selbsttest geworfen hat: Was
-// oeffentlich abrufbar ist, wird irgendwann abgerufen.
-//
-// Das Geheimnis kommt ausschliesslich im Kopf X-AHPT-Auth. Nicht im Rumpf --
-// der ist hier die Nutzlast der Messung, da hat kein Geheimnis hineinzugeraten.
-//
-// VOR DER EINGABE, NICHT DANACH
-// ------------------------------
-// Der Block steht mit Absicht oberhalb von file_get_contents('php://input'):
-// Die Zeile dort zieht den ganzen Rumpf in EINE Zeichenkette. Bei 8 MiB ist
-// das auf einem geteilten Webspace schon das Speicherlimit -- und der Deckel
-// MAX_RUMPF wuerde die Messung ohnehin bei 64 KiB abschneiden.
-if (($_GET['action'] ?? '') === 'messung') {
-    if (!agent_erlaubt([])) {
-        antwort(['ok' => false,
-                 'fehler' => 'Messung verlangt das Geheimnis im Kopf X-AHPT-Auth'], 403);
-    }
-    @set_time_limit(180);
-    // Nicht komprimieren lassen. Sonst misst man die Rechenleistung des
-    // Webservers statt der Leitung -- und zwar nach oben.
-    @ini_set('zlib.output_compression', 'Off');
-    while (ob_get_level() > 0) @ob_end_clean();
-
-    // ---- HINAUF: Rumpf lesen und wegwerfen, stueckweise.
-    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-        $ein = @fopen('php://input', 'rb');
-        $n = 0;
-        if ($ein !== false) {
-            while ($n < MESSUNG_MAX && !feof($ein)) {
-                $stueck = fread($ein, 65536);
-                if ($stueck === false || $stueck === '') break;
-                $n += strlen($stueck);
-            }
-            fclose($ein);
-        }
-        // Was WIRKLICH ankam, nicht was angekuendigt war. Manche Hoster
-        // schneiden grosse Rumpfe still ab (post_max_size); der Messende
-        // soll das sehen und nicht eine langsame Leitung vermuten.
-        antwort(['ok' => true, 'empfangen' => $n, 'grenze' => MESSUNG_MAX]);
-    }
-
-    // ---- HERUNTER: so viele Bytes ausgeben, wie verlangt.
-    $wunsch = (int)($_GET['bytes'] ?? 1048576);
-    if ($wunsch < 1) $wunsch = 1;
-    if ($wunsch > MESSUNG_MAX) $wunsch = MESSUNG_MAX;
-
-    // Zufall, nicht Nullen. Haengt am Webspace ein mod_deflate, presst es
-    // eine Nullfolge auf nichts zusammen, und die Messung meldet das
-    // Zehnfache der wahren Geschwindigkeit -- ein Messfehler, der wie ein
-    // gutes Ergebnis aussieht und deshalb niemandem auffaellt.
-    //
-    // Vier Bloecke reihum statt einem: deflates Fenster ist 32 KiB gross und
-    // reicht damit nicht bis zur naechsten Wiederholung eines 64-KiB-Blocks.
-    $bloecke = [];
-    for ($i = 0; $i < 4; $i++) $bloecke[] = random_bytes(65536);
-
-    header('Content-Type: application/octet-stream');
-    header('Content-Length: ' . $wunsch);
-    header('Cache-Control: no-store, no-cache, must-revalidate');
-    header('X-Content-Type-Options: nosniff');
-    $offen = $wunsch;
-    $i = 0;
-    while ($offen > 0) {
-        $b = $bloecke[$i++ % 4];
-        if ($offen < 65536) $b = substr($b, 0, $offen);
-        echo $b;
-        $offen -= strlen($b);
-        flush();
-    }
-    exit;
 }
 
 // ---------------------------------------------------------------- Eingabe
@@ -1332,10 +1223,6 @@ case 'selbsttest':
         //
         // Am 03.09.2026 gefunden, beim Nachsehen, was die Seite oeffentlich
         // hergibt.
-        // Damit ein Messwerkzeug nicht erst durch einen Fehlschlag
-        // herausfinden muss, ob dieser Vermittler die Messung kennt. Ein
-        // aelterer laesst das Feld weg -- daran ist er zu erkennen.
-        'messung_max'     => MESSUNG_MAX,
         'ablage_da'       => is_dir(ABLAGE),
         'ablage_schreib'  => is_dir(ABLAGE) && is_writable(ABLAGE),
         // Wie oft musste ein Platz verdraengt werden. Im Normalbetrieb 0.
@@ -1353,7 +1240,7 @@ case 'selbsttest':
 
 default:
     antwort(['ok' => false, 'fehler' => 'Unbekannte Aktion: ' . $aktion,
-             'aktionen' => ['frage', 'stueck', 'antwort', 'selbsttest', 'messung'],
+             'aktionen' => ['frage', 'stueck', 'antwort', 'selbsttest'],
              'hinweis' => 'Abgeholt wird NICHT ueber diese Datei, sondern statisch: '
                         . 'ahpt/warteschlange.json (Agent) bzw. '
                         . 'ahpt/antwort_<marke>.json (Besucher). Das ist der ganze Sinn.'], 400);
