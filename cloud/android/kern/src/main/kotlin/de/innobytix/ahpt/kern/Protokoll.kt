@@ -125,13 +125,69 @@ class AhptClient(
 
     /* ------------------------------------------------------------ Umlauf */
 
-    /** Ein vollstaendiger Vorgang: fragen, warten, Antwort auspacken. */
+    /**
+     * Die Abschnitte eines Vorgangs, in Millisekunden.
+     *
+     * `warten` ist der wertvolle Wert: die Zeit, bis der Agent die Frage
+     * bemerkt UND beantwortet hat. Der Test auf dem Rechner des Agenten muss
+     * diesen Anteil aus dem eingestellten Abfragetakt SCHAETZEN -- hier wird
+     * er gemessen, denn hier steht die Uhr am richtigen Ende.
+     */
+    class Zeiten {
+        var frageMs: Long = 0
+        var wartenMs: Long = 0
+        var holenMs: Long = 0
+        var gesamtMs: Long = 0
+        var abrufe: Int = 0
+        var eintraege: Int = 0
+        internal var bereit: Long = 0
+    }
+
+    /**
+     * Die Verbindung pruefen -- vom CLIENT aus, nicht vom Agenten.
+     *
+     * WARUM DAS HIER STEHEN MUSS
+     * ---------------------------
+     * Der Vermittlertest in starten.py laeuft auf dem Rechner des Agenten und
+     * spielt beide Rollen. Ehrlich misst er damit die Strecke Agent <->
+     * Webspace. Die andere Haelfte -- Webspace <-> DIESES Geraet -- sieht er
+     * prinzipiell nicht, denn dort steht er nicht. Und genau die spuert der
+     * Anwender, wenn er im Mobilfunk oder in einem fremden WLAN sitzt.
+     *
+     * Hier sitzt der Client. Er ist zugelassen, also stellt er eine ECHTE
+     * Frage und laesst die Uhr mitlaufen -- ohne Fuellstoff, ohne Sonderweg,
+     * ohne einen Endpunkt, den es sonst nicht gaebe.
+     *
+     * Gemessen wird die ANTWORTZEIT, nicht der Durchsatz: Eine Auflistung ist
+     * klein. Wieviel durch die Leitung passt, zeigt das naechste
+     * Herunterladen einer richtigen Datei.
+     */
+    fun messeVerbindung(pfad: String = ""): Zeiten {
+        val z = Zeiten()
+        val t0 = jetzt()
+        val antwort = frage("dateien", "liste", JSONObject().put("pfad", pfad),
+                            null, z)
+        z.eintraege = antwort.optJSONArray("eintraege")?.length() ?: 0
+        z.gesamtMs = jetzt() - t0
+        return z
+    }
+
+    /** Ein vollstaendiger Vorgang: fragen, warten, Antwort auspacken.
+     *
+     * `zeiten` ist freiwillig. Wird eines uebergeben, traegt dieser Vorgang
+     * seine Abschnitte darin ein -- ohne dass am Ablauf etwas anders liefe.
+     * Genau das macht die Verbindungspruefung glaubwuerdig: Sie misst den
+     * ECHTEN Vorgang, sie baut ihn nicht nach. Eine Nachbildung haette die
+     * Fehler nicht, die man sucht.
+     */
     fun frage(
         dienst: String,
         aktion: String,
         daten: JSONObject,
         melde: FortschrittMelder? = null,
+        zeiten: Zeiten? = null,
     ): JSONObject {
+        val begonnen = jetzt()
         val sitzung = HandshakeIK(Suite.ChaChaPoly, AHPT_PROLOG, privat, agent)
         val klartext = JSONObject()
             .put("dienst", dienst)
@@ -151,7 +207,14 @@ class AhptClient(
         }
         if (marke.length != 32) throw AhptFehler("Vermittler gab keine gueltige Marke")
 
-        return auspacken(marke, warte(marke, melde), sitzung)
+        zeiten?.frageMs = jetzt() - begonnen
+        val umschlag = warte(marke, melde, zeiten)
+        val ergebnis = auspacken(marke, umschlag, sitzung)
+        if (zeiten != null) {
+            zeiten.holenMs = jetzt() - zeiten.bereit
+            zeiten.gesamtMs = jetzt() - begonnen
+        }
+        return ergebnis
     }
 
     /**
@@ -224,13 +287,28 @@ class AhptClient(
      * andere Grund bleibt: EIN Abruf beantwortet die Frage fuer alle
      * laufenden Vorgaenge, nicht einer je Vorgang.
      */
-    private fun warte(marke: String, melde: FortschrittMelder?): JSONObject {
+    private fun warte(
+        marke: String,
+        melde: FortschrittMelder?,
+        zeiten: Zeiten? = null,
+    ): JSONObject {
         val bis = jetzt() + fristMs
+        val begonnen = jetzt()
         var abstand = 350L
+        var abrufe = 0
         while (jetzt() < bis) {
             val q = holeJson("warteschlange.json")
+            abrufe++
             val fertig = q?.optJSONArray("fertig")
             if (fertig != null && (0 until fertig.length()).any { fertig.optString(it) == marke }) {
+                // Der Zeitpunkt, an dem die Antwort BEREITLAG. Alles davor
+                // ist Warten auf den Agenten, alles danach die Leitung
+                // hierher -- und die zwei zu trennen ist der Sinn der Sache.
+                if (zeiten != null) {
+                    zeiten.wartenMs = jetzt() - begonnen
+                    zeiten.abrufe = abrufe
+                    zeiten.bereit = jetzt()
+                }
                 return holeJson("antwort_$marke.json") ?: throw AhptFehler(
                     "Die Warteschlange meldet die Antwort als fertig, aber die " +
                             "Datei fehlt. Das deutet auf ein Aufraeumen zur Unzeit hin.",

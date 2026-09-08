@@ -109,8 +109,16 @@ class AhptPortal {
     return r.json();
   }
 
-  /** Ein vollstaendiger Vorgang: fragen, warten, Antwort auspacken. */
-  async frage(dienst, aktion, daten, beiFortschritt) {
+  /** Ein vollstaendiger Vorgang: fragen, warten, Antwort auspacken.
+   *
+   * `zeiten` ist freiwillig. Wird ein Objekt uebergeben, traegt dieser
+   * Vorgang seine Abschnitte darin ein -- ohne dass am Ablauf selbst
+   * etwas anders liefe. Genau das macht die Verbindungspruefung
+   * glaubwuerdig: Sie MISST DEN ECHTEN VORGANG, sie baut ihn nicht nach.
+   * Eine Nachbildung wuerde die Fehler nicht haben, die man sucht.
+   */
+  async frage(dienst, aktion, daten, beiFortschritt, zeiten) {
+    const t0 = Date.now();
     const sitzung = await HandshakeIK.neu(AHPT_PROLOG, this.privat, this.agent);
     const klartext = new TextEncoder().encode(
       JSON.stringify({ dienst: dienst, aktion: aktion, daten: daten }));
@@ -127,8 +135,48 @@ class AhptPortal {
     if (typeof marke !== 'string' || marke.length !== 32) {
       throw new AhptFehler('Vermittler gab keine gueltige Marke');
     }
-    const umschlag = await this._warte(marke, beiFortschritt);
-    return this._auspacken(marke, umschlag, sitzung);
+    if (zeiten) zeiten.frage_ms = Date.now() - t0;
+    const umschlag = await this._warte(marke, beiFortschritt, zeiten);
+    const ergebnis = await this._auspacken(marke, umschlag, sitzung);
+    if (zeiten) {
+      zeiten.holen_ms = Date.now() - (zeiten._bereit || Date.now());
+      zeiten.gesamt_ms = Date.now() - t0;
+      zeiten.marke = marke;
+      delete zeiten._bereit;
+    }
+    return ergebnis;
+  }
+
+  /*
+   * Die Verbindung pruefen -- vom CLIENT aus, nicht vom Agenten.
+   *
+   * WARUM DAS HIER STEHEN MUSS UND NICHT BEIM AGENTEN
+   * --------------------------------------------------
+   * Der Vermittlertest in starten.py laeuft auf dem Rechner des Agenten und
+   * spielt beide Rollen. Was er ehrlich misst, ist die Strecke Agent <->
+   * Webspace. Die ANDERE Haelfte -- Webspace <-> dieses Geraet -- kann er
+   * prinzipiell nicht sehen: Dort steht er ja nicht. Und genau die ist es,
+   * die der Anwender spuert, wenn er unterwegs im Mobilfunk oder in einem
+   * fremden WLAN sitzt.
+   *
+   * Hier dagegen sitzt der Client. Er ist zugelassen, also kann er eine
+   * ECHTE Frage stellen und die Uhr mitlaufen lassen -- ohne Fuellstoff,
+   * ohne Sonderweg, ohne einen Endpunkt, den es sonst nicht gaebe.
+   *
+   * Gemessen wird die ANTWORTZEIT, nicht der Durchsatz: Eine Auflistung ist
+   * klein. Wieviel durch die Leitung passt, zeigt sich beim naechsten
+   * Herunterladen einer richtigen Datei -- und diese Zahl steht dort dann
+   * auch.
+   */
+  async messeVerbindung(pfad) {
+    const zeiten = {};
+    const t0 = Date.now();
+    const antwort = await this.frage('dateien', 'liste',
+                                     { pfad: pfad || '' }, null, zeiten);
+    zeiten.eintraege = (antwort && antwort.eintraege
+                        && antwort.eintraege.length) || 0;
+    zeiten.gesamt_ms = Date.now() - t0;
+    return zeiten;
   }
 
   /*
@@ -205,12 +253,24 @@ class AhptPortal {
    * Nebenbei spart es Abrufe: EIN Abruf beantwortet die Frage fuer alle
    * laufenden Vorgaenge, nicht einer je Vorgang.
    */
-  async _warte(marke, beiFortschritt) {
+  async _warte(marke, beiFortschritt, zeiten) {
     const bis = Date.now() + this.frist;
+    const t0 = Date.now();
     let abstand = 350;
+    let abrufe = 0;
     while (Date.now() < bis) {
       const q = await this._hole('warteschlange.json');
+      abrufe++;
       if (q && Array.isArray(q.fertig) && q.fertig.indexOf(marke) >= 0) {
+        // Der Zeitpunkt, an dem die Antwort BEREITLAG. Alles davor ist
+        // Warten, alles danach ist Holen -- und die zwei zu trennen ist
+        // der Sinn der Sache: Warten heisst "der Agent war noch nicht
+        // soweit", Holen heisst "die Leitung hierher".
+        if (zeiten) {
+          zeiten.warten_ms = Date.now() - t0;
+          zeiten.abrufe = abrufe;
+          zeiten._bereit = Date.now();
+        }
         const u = await this._hole('antwort_' + marke + '.json');
         if (u) return u;
         throw new AhptFehler(

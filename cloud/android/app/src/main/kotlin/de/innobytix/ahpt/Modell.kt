@@ -160,6 +160,32 @@ class Modell(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * Die Verbindung pruefen -- von HIER aus, wo das Geraet steht.
+     *
+     * Der Vermittlertest auf dem Rechner des Agenten misst die Strecke Agent
+     * <-> Webspace. Die andere Haelfte -- Webspace <-> dieses Handy -- kann
+     * er prinzipiell nicht sehen, und genau die spuert man unterwegs im
+     * Mobilfunk. Gemessen wird mit einer ECHTEN Frage ueber den ganzen Weg,
+     * nicht mit einem Sonderaufruf.
+     */
+    fun pruefeVerbindung() = vorgang {
+        val z = client().messeVerbindung(_zustand.value.pfad)
+        val umbruch = "\n"
+        melde(
+            "Ein vollstaendiger Vorgang ueber den ganzen Weg -- dieses Geraet, " +
+                "Vermittler, Agent und zurueck -- hat " +
+                "%.1f s gebraucht.".format(z.gesamtMs / 1000.0) +
+                umbruch + umbruch +
+                "Frage ablegen: ${z.frageMs} ms" + umbruch +
+                "Warten auf den Agenten: ${z.wartenMs} ms " +
+                "(${z.abrufe} Abfrage${if (z.abrufe == 1) "" else "n"})" + umbruch +
+                "Antwort holen: ${z.holenMs} ms" + umbruch + umbruch +
+                "Gemessen wird die Antwortzeit, nicht der Durchsatz -- eine " +
+                "Auflistung ist klein. Ist dieser Wert gut und AHPT trotzdem " +
+                "zaeh, liegt es nicht an der Strecke zu diesem Geraet.")
+    }
+
+    /**
      * Die Liste eines Ordners holen und anzeigen -- wenn wir noch dran sind.
      */
     private suspend fun zeigeListe(pfad: String, meine: Int) {

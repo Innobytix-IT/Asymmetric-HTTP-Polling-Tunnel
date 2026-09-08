@@ -330,6 +330,13 @@ private fun Dateien(modell: Modell, zurEinrichtung: () -> Unit) {
                     }
                 },
                 actions = {
+                    // Die Verbindung von HIER aus messen. Der Test auf dem
+                    // Rechner des Agenten sieht die Strecke hierher nicht --
+                    // dort steht er nicht, und genau die spuert man
+                    // unterwegs im Mobilfunk.
+                    IconButton(onClick = { modell.pruefeVerbindung() }) {
+                        Icon(Icons.Default.NetworkCheck, "Verbindung pruefen")
+                    }
                     IconButton(onClick = { modell.lade() }) {
                         Icon(Icons.Default.Refresh, "Neu laden")
                     }

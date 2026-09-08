@@ -356,7 +356,7 @@ erschiene beim Besucher als echter Inhalt.
 | `MARKE_TTL` | 120 s | liegengebliebene Fragen |
 | `ANTWORT_TTL` | 120 s | liegengebliebene Antworten (Inodes) |
 | `MAX_OFFEN` | 40 | Auslastung insgesamt |
-| `MAX_JE_IP` | 5 | ein Absender allein |
+| `MAX_JE_IP` | 20 | ein Absender allein |
 | `MAX_FRAGE` | 4 KiB | Fragegroesse |
 | `MAX_STUECK` | 48 KiB | ein Stueck |
 | `MAX_TEILE` | 256 | Antwort gesamt ~12 MiB |
@@ -367,6 +367,18 @@ erschiene beim Besucher als echter Inhalt.
 `FRAGE_MAX_ALTER` muss **unter** `MARKE_TTL` liegen. Sonst bearbeitet der
 Agent eine Frage, deren Marke waehrenddessen verfaellt, und legt die Antwort
 in ein Nichts.
+
+`MAX_JE_IP` stand bis zum 03.09.2026 auf **5** und war damit zu streng: Eine
+abgewiesene Frage belegt ihren Platz bis `MARKE_TTL`, weil der Agent auf
+etwas, das er nicht entschluesseln kann, absichtlich NICHT antwortet. Nach
+fuenf Fehlversuchen -- ein falscher Schluessel beim Einrichten genuegt -- war
+der eigene Zugang zwei Minuten gesperrt, mit der Meldung "Zu viele offene
+Fragen". Die stimmt und fuehrt trotzdem in die Irre. Dazu kommt, dass ein
+Portal beim Blaettern mehrere Ordner kurz hintereinander abfragt und die
+Zielgruppe dieses Projekts per Definition hinter CGNAT sitzt, sich eine IPv4
+also teilt. Die eigentliche Schranke gegen das Besetzen der Warteschlange
+ist ohnehin nicht dieser Deckel, sondern das faire Verdraengen: Wer die
+meisten Plaetze haelt, verliert seinen aeltesten zuerst.
 
 ---
 

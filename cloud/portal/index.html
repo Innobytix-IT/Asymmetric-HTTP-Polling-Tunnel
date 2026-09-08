@@ -304,6 +304,7 @@ dialog::backdrop { background: rgba(0,0,0,.7); }
        Am Header bleibt die Ecke immer die tatsaechliche rechte
        Bildschirmkante. Gefunden und behoben am 06.09.2026. -->
   <div id="menu-dropdown" class="dropdown" hidden>
+    <button id="btn-verbindung">Verbindung pr&uuml;fen</button>
     <button id="btn-einrichten">Einrichtung</button>
   </div>
 </header>
@@ -579,6 +580,52 @@ function zeigeEinrichtung(an) {
   $('#karte-einrichtung').hidden = !an;
   $('#karte-dateien').hidden = an;
 }
+
+/* ------------------------------------------------- Verbindung pruefen
+
+   WAS DAS MISST, UND WAS DER TEST AUF DEM SERVER NICHT MESSEN KANN
+   -----------------------------------------------------------------
+   Der Vermittlertest in starten.py laeuft auf dem Rechner des Agenten und
+   spielt beide Rollen. Ehrlich misst er damit die Strecke Agent <->
+   Webspace. Die andere Haelfte -- Webspace <-> DIESES Geraet -- sieht er
+   prinzipiell nicht, denn dort steht er nicht. Und genau die spuert der
+   Anwender, wenn er im Mobilfunk oder in einem fremden WLAN sitzt.
+
+   Hier sitzt der Client. Also wird hier gemessen, mit einer ECHTEN Frage
+   ueber den ganzen Weg: dieses Geraet -> Vermittler -> Agent -> Vermittler
+   -> dieses Geraet. */
+$('#btn-verbindung').onclick = async () => {
+  if (!portal) {
+    melde('Erst einrichten und verbinden -- ohne Verbindung gibt es nichts '
+          + 'zu messen.', 'warn');
+    return;
+  }
+  meldungenLeeren();
+  const laeuft = melde('Verbindung wird gepr&uuml;ft &hellip;', 'gut', true);
+  try {
+    const z = await portal.messeVerbindung(pfad);
+    laeuft.remove();
+    melde(
+      '<b>Verbindung gepr&uuml;ft.</b> Ein vollst&auml;ndiger Vorgang &uuml;ber '
+      + 'den ganzen Weg &ndash; dieses Ger&auml;t, Vermittler, Agent und '
+      + 'zur&uuml;ck &ndash; hat <b>' + (z.gesamt_ms / 1000).toFixed(1)
+      + ' s</b> gebraucht.<br><br>'
+      + 'Frage ablegen: ' + z.frage_ms + ' ms<br>'
+      + 'Warten auf den Agenten: ' + z.warten_ms + ' ms ('
+      + z.abrufe + ' Abfrage' + (z.abrufe === 1 ? '' : 'n') + ')<br>'
+      + 'Antwort holen: ' + z.holen_ms + ' ms<br><br>'
+      + '<span class="klein">Gemessen wird die ANTWORTZEIT, nicht der '
+      + 'Durchsatz &ndash; eine Auflistung ist klein. Wieviel durch die '
+      + 'Leitung passt, steht nach dem n&auml;chsten Herunterladen einer '
+      + 'richtigen Datei. Ist dieser Wert hier gut und AHPT trotzdem z&auml;h, '
+      + 'liegt es nicht an der Strecke zu diesem Ger&auml;t.</span>',
+      'gut', true);
+  } catch (e) {
+    laeuft.remove();
+    melde('Die Pr&uuml;fung ist fehlgeschlagen: ' + esc(e.message), 'fehler',
+          true);
+  }
+};
 
 $('#btn-einrichten').onclick = () => zeigeEinrichtung($('#karte-einrichtung').hidden);
 

@@ -33,6 +33,31 @@ neun Nadeln taucht auf.
 
 ## Einrichten
 
+Es gibt **zwei Wege**, und sie fuehren zum selben Ergebnis.
+
+### Der bequeme: der Assistent
+
+```bash
+python3 starten.py          # Fenster; Doppelklick geht auch
+python3 einrichten.py       # dasselbe ohne Fenster, direkt im Browser
+```
+
+`starten.py` ist ein kleines Fenster (tkinter) und der einzige Punkt, an dem
+ein Anwender ueberhaupt etwas anklickt. Es startet den Assistenten, und ab
+da geht es im Browser weiter: Webspace, Vermittler hochladen (per FTP oder
+von Hand), Schluessel, Konfiguration, Agent, Geraete koppeln. Wer schon
+eingerichtet ist, sieht dort stattdessen den Zustand des Agenten, kann ihn
+anhalten und wieder starten, den Autostart setzen und den Vermittler pruefen.
+
+Auf einem Heimserver ohne Bildschirm gibt es kein Fenster. Dann sagt
+`starten.py` das und nennt die Befehle -- der Weg ueber die Konsole
+funktioniert unveraendert.
+
+### Der von Hand
+
+Alles, was der Assistent tut, laesst sich auch einzeln machen. Wer wissen
+will, was da passiert, oder wem der Assistent im Weg ist, nimmt diesen Weg.
+
 ### 1. Auf dem Heimserver
 
 ```bash
@@ -99,6 +124,60 @@ oeffentlichen Teil traegst du beim Agenten ein.
 Danach: Dateiliste mit Ordnern, Herunterladen, Hochladen per Ziehen und
 Ablegen (auch mehrere auf einmal, mit Fortschritt), Ordner anlegen, Filtern,
 Vorschau fuer Bilder, PDF und Text.
+
+---
+
+## Nachsehen, ob es noch geht
+
+Ein Vermittler kann auf drei Arten unbrauchbar sein, und nur zwei davon
+sieht man ihm an: Er kann **weg** sein, er kann **dastehen und nicht mehr
+schreiben** duerfen, oder er kann **noch tadellos antworten und dabei so
+langsam geworden sein**, dass AHPT unbenutzbar ist. Der dritte Fall ist bei
+kostenlosem Webspace der haeufigste -- gedrosselt, ueberbucht, oder der
+Anbieter hat den Vertrag stillschweigend eingekuerzt -- und von aussen ist
+er nicht zu erkennen: Die Seite laedt, der Selbsttest sagt "ok", und
+trotzdem braucht eine Datei zehn Minuten. Wer das nicht messen kann, sucht
+den Fehler bei sich und findet ihn nie.
+
+### Vermittler pruefen
+
+Im Fenster von `starten.py`. Gemessen wird **ein vollstaendiger Vorgang**,
+kein Bandbreitentest: Eine Datei wird abgelegt und wieder abgeholt, genau so
+wie im Betrieb -- mit denselben Stuecken zu 48 KiB, demselben Umlauf je
+Stueck, derselben Aufblaehung durch Base64.
+
+Das ist ein Unterschied ums Zehnfache. Auf derselben Strecke gemessen:
+196 Mbit/s roh, 18 Mbit/s wirksam. Was AHPT kostet, ist nicht die Leitung,
+sondern die Stueckelung -- und genau das sieht ein gewoehnlicher
+Bandbreitentest nicht.
+
+Ausgewiesen werden Rundlauf, Arbeit, Wartezeit und Umlauf getrennt, dazu
+welche **Richtung** bremst. Ein Verlauf in `~/.ahpt/messungen.json` haelt
+die letzten fuenfzig fest: "Gedrosselt" ist an einer einzelnen Zahl gar
+nicht zu erkennen, nur am Vergleich mit vorher.
+
+### Die eigene Leitung als Vergleich
+
+Ohne sie sagt die Messung nur die Haelfte: Ein Anschluss mit 20 Mbit/s
+hinauf kann nicht mehr hergeben, und dann ist ein langsamer Rundlauf kein
+Mangel des Webspace, sondern die Wahrheit ueber die eigene Leitung. Beides
+sieht gleich aus.
+
+Die Vertragsrate laesst sich im Messfenster eintragen. Wer es genauer will:
+
+```bash
+python3 miss_leitung.py
+```
+
+**Das ist das einzige Stueck AHPT, das mit einem Dritten redet.** Deshalb
+ist es ein eigenes Programm, deshalb sagt es vorher, wen es anruft, was der
+erfaehrt und was es an Verkehr kostet, und deshalb kann man es loeschen,
+ohne dass sonst etwas fehlt. Die Verbindung zum Rest ist eine Datei:
+
+    miss_leitung.py  --schreibt-->  ~/.ahpt/leitung.json  <--liest--  starten.py
+
+Wer es nie startet, hat ein AHPT, das ausschliesslich mit dem eigenen
+Webspace redet.
 
 ---
 
