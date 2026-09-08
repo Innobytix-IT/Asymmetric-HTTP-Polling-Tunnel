@@ -80,21 +80,15 @@ Push von oertlich wuerde beides loeschen. GitHub ist der massgebliche Stand.
 
 ---
 
-## 5. Abbruch und Einzelsperre der App sind nur im Code geprueft
+## 5. Die Einzelsperre der App ist nur im Code geprueft
 
-Von den fuenf Nachruestungen vom 08.09.2026 sind vier auf echter Hardware
-gesehen worden (Fortschritt je Stueck, Restzeit, Uebertragungsdialog,
-Ansehen/Speichern). Zwei Wege nicht:
+Wer waehrend eines laufenden Downloads eine zweite Datei antippt, sollte
+eine Meldung bekommen statt eines zweiten Vorgangs. Die Sperre haengt an
+einem `AtomicBoolean` in `Modell.uebertragung()`; gesehen hat den Fall
+noch niemand.
 
-- **"Abbrechen" waehrend einer laufenden Uebertragung.** Der Rueckruf wird
-  zwischen den Bloecken UND zwischen den Stuecken gefragt, es sollte also
-  spaetestens nach einem Stueck (48 KiB) greifen. Gesehen ist das nicht.
-- **Die Sperre gegen zwei gleichzeitige Uebertragungen.** Sie haengt an
-  einem `AtomicBoolean`; wer waehrend eines Downloads eine zweite Datei
-  antippt, sollte eine Meldung bekommen statt eines zweiten Vorgangs.
-
-**Zum Nachholen:** grosse Datei holen, auf halber Strecke abbrechen -- und
-waehrend sie laeuft eine zweite antippen.
+**Zum Nachholen:** grosse Datei holen und, waehrend sie laeuft, eine
+zweite antippen.
 
 ---
 
@@ -125,3 +119,15 @@ hat.
   ```
 
   Damit ist auch die Sorge erledigt, das Meldungsfeld koenne abschneiden.
+
+- **08.09.2026 -- "Abbrechen" wirkt sofort.** Zwei Fehler steckten
+  dahinter, und beide sahen von aussen gleich aus. Der Rueckruf wurde nur
+  ZWISCHEN den Bloecken gefragt -- bei 4 MiB je Block hat eine 8-MB-Datei
+  genau eine Pruefstelle, und der Bildschirmabzug zeigte "Wird
+  abgebrochen ..." bei exakt "4,0 MB von 8,0 MB". Ausserdem ueberschrieb
+  die naechste Stueckmeldung den Satz nach Sekundenbruchteilen wieder.
+  Beides behoben (`eb43494a`), auf einem SM-G970F nachgeprueft.
+
+  Nebenbei richtiggestellt: In der ersten Fassung dieses Punktes stand,
+  der Rueckruf werde "zwischen den Bloecken UND zwischen den Stuecken"
+  gefragt. Das war falsch. Jetzt stimmt es.
