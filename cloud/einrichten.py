@@ -243,8 +243,9 @@ def schritt_ftp(daten):
     del passwort  # nicht laenger als noetig im Speicher halten
 
     # Probe: klappt ein LIST auf dem Wurzelordner?
+    annehmen = bool(daten.get('zertifikat_annehmen'))
     try:
-        _ftp_liste(host)
+        _ftp_liste(host, annehmen)
     except EinrichtenFehler:
         raise
     except Exception as e:
@@ -255,9 +256,15 @@ def schritt_ftp(daten):
     with _schloss:
         _stand['ftp_host'] = host
         _stand['ftp_benutzer'] = benutzer
+        # Merken, damit das Hochladen gleich weiterlaeuft. Es steht als
+        # eigener Wert da und nicht implizit im Erfolg der Probe: Wer spaeter
+        # in die Konfiguration schaut, soll sehen, dass hier ein Zertifikat
+        # ungeprueft angenommen wird.
+        _stand['ftp_zertifikat_annehmen'] = annehmen
         stand_schreiben(_stand)
 
     return {'ok': True, 'host': host, 'benutzer': benutzer,
+            'zertifikat_angenommen': annehmen,
             'weiter': 'hochladen'}
 
 
@@ -465,17 +472,52 @@ def _netrc_eintragen(pfad, host, benutzer, passwort):
         f.write(inhalt)
 
 
-def _ftp_liste(host):
+def _curl_deuten(kode, stderr):
+    """Aus einem curl-Fehlercode eine Meldung machen, die weiterhilft.
+
+    Frueher stand hier bei JEDEM Fehler "Passt Benutzer und Passwort?" --
+    auch bei 60, und der hat mit dem Passwort nichts zu tun. Am 07.09.2026
+    hat genau das in die Irre gefuehrt: bplaced weist ein selbstsigniertes
+    Zertifikat vor, curl bricht ab, und der Nutzer sucht seinen Tippfehler
+    im Passwort, das voellig in Ordnung ist.
+    """
+    kurz = stderr.strip().splitlines()
+    kurz = kurz[-1][:200] if kurz else ''
+    deutungen = {
+        6:  'Der Rechnername liess sich nicht aufloesen. Steht er richtig da?',
+        7:  'Keine Verbindung zum FTP-Dienst. Laeuft er, und ist es der '
+            'richtige Rechner?',
+        9:  'Der Server hat den Zugriff verweigert -- meist ein Pfad, den es '
+            'so nicht gibt, oder fehlende Rechte im Konto.',
+        28: 'Zeitueberschreitung. Der Server antwortet nicht schnell genug.',
+        60: 'ZERTIFIKAT: Der Server weist eines vor, das sich nicht pruefen '
+            'laesst -- meist ein selbstsigniertes. Das hat NICHTS mit '
+            'Benutzer oder Passwort zu tun. Bei manchen Anbietern (bplaced '
+            'zum Beispiel) ist das der Normalfall. Unten laesst sich das '
+            'Zertifikat annehmen; die Verbindung bleibt dann verschluesselt, '
+            'nur ungeprueft, WER am anderen Ende sitzt.',
+        67: 'Anmeldung abgelehnt. Hier passen Benutzer oder Passwort '
+            'tatsaechlich nicht.',
+        78: 'Die angegebene Datei oder der Ordner existiert dort nicht.',
+    }
+    return 'FTP: %s (curl-Fehler %d%s)' % (
+        deutungen.get(kode, 'curl bricht ab.'), kode,
+        ': ' + kurz if kurz else '')
+
+
+def _ftp_liste(host, zertifikat_annehmen=False):
     """Testet .netrc + FTPS-Verbindung mit einem einfachen LIST."""
-    p = subprocess.run(
-        ['curl', '-sS', '--netrc', '--ssl-reqd',
-         'ftp://%s/' % host],
-        capture_output=True, timeout=25)
+    befehl = ['curl', '-sS', '--netrc', '--ssl-reqd']
+    if zertifikat_annehmen:
+        # Verschluesselt bleibt es, nur ungeprueft. Das ist eine bewusste
+        # Entscheidung des Nutzers, kein stiller Rueckfall -- deshalb steht
+        # der Schalter in der Oberflaeche und nicht hier fest verdrahtet.
+        befehl.append('--insecure')
+    befehl.append('ftp://%s/' % host)
+    p = subprocess.run(befehl, capture_output=True, timeout=25)
     if p.returncode != 0:
         raise EinrichtenFehler(
-            'FTP: curl meldet Fehler %d. Passt Benutzer und Passwort? '
-            '(%s)' % (p.returncode,
-                      p.stderr.decode('utf-8', 'replace')[:200]))
+            _curl_deuten(p.returncode, p.stderr.decode('utf-8', 'replace')))
     return p.stdout.decode('utf-8', 'replace')
 
 
@@ -487,14 +529,17 @@ def _ftp_hochladen(host, fernpfad, inhalt):
     try:
         with open(tmp, 'wb') as f:
             f.write(inhalt)
-        p = subprocess.run(
-            ['curl', '-sS', '--netrc', '--ssl-reqd', '--ftp-create-dirs',
-             '-T', tmp, 'ftp://%s%s' % (host, ferner)],
-            capture_output=True, timeout=60)
+        befehl = ['curl', '-sS', '--netrc', '--ssl-reqd', '--ftp-create-dirs']
+        if _stand.get('ftp_zertifikat_annehmen'):
+            befehl.append('--insecure')
+        befehl += ['-T', tmp, 'ftp://%s%s' % (host, ferner)]
+        p = subprocess.run(befehl, capture_output=True, timeout=60)
         if p.returncode != 0:
             raise EinrichtenFehler(
-                'Hochladen von %s scheiterte: %s'
-                % (fernpfad, p.stderr.decode('utf-8', 'replace')[:200]))
+                'Hochladen von %s scheiterte. %s'
+                % (fernpfad,
+                   _curl_deuten(p.returncode,
+                                p.stderr.decode('utf-8', 'replace'))))
         return {'pfad': fernpfad, 'bytes': len(inhalt)}
     finally:
         try:
@@ -1382,6 +1427,9 @@ body { margin: 0; background: var(--grund); color: var(--text);
 .leiste .stufe.jetzt { background: var(--akzent-hell); color: var(--akzent);
                        font-weight: 600 }
 .leiste .stufe.fertig { color: var(--akzent) }
+.leiste .stufe.klickbar { cursor: pointer }
+.leiste .stufe.klickbar:hover { background: var(--flaeche-hoch);
+  color: var(--akzent-glut) }
 main { max-width: 720px; margin: 0 auto; padding: 32px 24px 96px }
 .karte { background: var(--karte); border: 1px solid var(--rand);
          border-radius: 12px; padding: 24px 28px; margin-bottom: 20px }
@@ -1451,22 +1499,63 @@ const SCHRITTE = [
   { name: 'willkommen', titel: 'Willkommen'       },
   { name: 'pruefen',    titel: 'Voraussetzungen'  },
   { name: 'webspace',   titel: 'Webspace'         },
-  { name: 'ftp',        titel: 'FTP-Zugang'       },
-  { name: 'hochladen',  titel: 'Vermittler'       },
+  { name: 'ftp',        titel: 'Vermittler'       },
+  { name: 'hochladen',  titel: 'Hochladen'        },
   { name: 'schluessel', titel: 'Schluessel'       },
   { name: 'agent',      titel: 'Agent'            },
   { name: 'portal',     titel: 'Portal'           },
   { name: 'fertig',     titel: 'Fertig'           },
 ];
+
+/* Welche Funktion zeigt welchen Schritt.
+ *
+ * Gebraucht, damit die Leiste oben ANKLICKBAR wird. Vorher war sie reine
+ * Anzeige, und der Assistent fing immer bei "Willkommen" an -- wer nur
+ * seinen Webspace wechseln wollte, musste sich durch alles davor klicken.
+ * Genau das haelt Leute davon ab, etwas zu aendern. */
+const ZEIGER = {
+  willkommen: () => zeigeWillkommen(),
+  pruefen:    () => zeigePruefen(),
+  webspace:   () => zeigeWebspace(),
+  ftp:        () => zeigeWieHochladen(),
+  hochladen:  () => zeigeHochladen(),
+  schluessel: () => zeigeSchluessel(),
+  agent:      () => zeigeAgent(),
+  portal:     () => zeigePortal(),
+  fertig:     () => zeigeFertig(),
+};
 let stand = {};
 let jetzt = 0;
+
+/* Ist die Einrichtung einmal durchgelaufen?
+ *
+ * Davon haengt ab, ob die Leiste oben anklickbar ist -- und das ist keine
+ * Feinheit. WAEHREND der Ersteinrichtung baut jeder Schritt auf dem
+ * vorigen auf: ohne Webspace kein Hochladen, ohne Schluessel keine
+ * Konfiguration. Eine anklickbare Leiste laedt dort dazu ein, etwas zu
+ * ueberspringen, und das Ergebnis waere eine halbe Einrichtung, die
+ * irgendwo spaeter mit einer raetselhaften Meldung scheitert.
+ *
+ * DANACH ist es umgekehrt: Wer seinen Webspace wechselt, will genau zu
+ * diesem einen Schritt und nicht durch acht andere. */
+let fertigEingerichtet = false;
 
 function leiste() {
   const l = $('#leiste');
   l.innerHTML = SCHRITTE.map((s, i) => {
     const klasse = i < jetzt ? 'fertig' : i === jetzt ? 'jetzt' : '';
-    return '<span class="stufe ' + klasse + '">' + (i + 1) + '. ' + s.titel + '</span>';
+    // Springen nur bei fertiger Einrichtung, und nur rueckwaerts oder auf
+    // den aktuellen Schritt.
+    const offen = fertigEingerichtet && i <= jetzt;
+    return '<span class="stufe ' + klasse + (offen ? ' klickbar' : '') + '"'
+      + (offen ? ' onclick="springe(' + i + ')" title="Zu diesem Schritt"' : '')
+      + '>' + (i + 1) + '. ' + s.titel + '</span>';
   }).join('');
+}
+
+function springe(i) {
+  const f = ZEIGER[SCHRITTE[i].name];
+  if (f) f();
 }
 
 async function jsonAn(pfad, koerper) {
@@ -1782,13 +1871,32 @@ async function pruefeFtp() {
       host:     $('#fHost').value.trim(),
       benutzer: $('#fBenutzer').value.trim(),
       passwort: $('#fPasswort').value,
+      zertifikat_annehmen: $('#fZertifikat') ? $('#fZertifikat').checked : false,
     });
     // Passwortfeld leeren
     $('#fPasswort').value = '';
-    ort.innerHTML = meldung('Verbunden. Ordner ist auflistbar.', 'gut');
+    ort.innerHTML = meldung(
+      'Verbunden. Ordner ist auflistbar.'
+      + (d.zertifikat_angenommen
+         ? ' Das Zertifikat wurde dabei ungeprueft angenommen.' : ''), 'gut');
     setTimeout(() => zeigeHochladen(), 700);
   } catch (e) {
     ort.innerHTML = meldung(e.message, 'fehler');
+    // Genau bei diesem Fehler hilft das Kaestchen -- also erst dann zeigen.
+    // Vorher waere es eine Einladung, die Pruefung abzuschalten, bevor
+    // ueberhaupt etwas schiefging.
+    if (/curl-Fehler 60/.test(e.message) && !$('#fZertifikat')) {
+      ort.insertAdjacentHTML('beforeend',
+        '<div style="margin-top:10px">'
+        + '<label><input type="checkbox" id="fZertifikat"> '
+        + 'Zertifikat annehmen, ohne es zu pruefen</label>'
+        + '<div class="klein" style="margin-top:4px">'
+        + 'Die Verbindung bleibt verschluesselt &ndash; ungeprueft bleibt '
+        + 'nur, WER am anderen Ende sitzt. Im eigenen Heimnetz gegen den '
+        + 'eigenen Hoster ist das vertretbar; in einem fremden Netz koennte '
+        + 'sich jemand dazwischenschalten und das Passwort mitlesen. '
+        + 'Danach noch einmal auf &bdquo;Testen und weiter&ldquo;.</div></div>');
+    }
   }
 }
 
@@ -2030,8 +2138,14 @@ function zeigeFertig() {
     + '~/.ahpt/agent_privat.toml</code> im Terminal starten.</li>'
     + '<li>Ein neues Ger&auml;t einrichten: den Knopf unten benutzen, '
     + 'kein SSH und Texteditor n&ouml;tig.</li>'
-    + '<li>Diesen Assistenten nochmal aufrufen: <code>python3 einrichten.py</code>. '
-    + 'Er &uuml;bernimmt den letzten Stand.</li>'
+    + (fertigEingerichtet
+       ? '<li>Etwas &auml;ndern &ndash; anderer Webspace, anderer Ordner, neue '
+         + 'Schl&uuml;ssel: oben in der Leiste auf den Schritt klicken. Das '
+         + 'geht erst jetzt, wo alles einmal durchgelaufen ist.</li>'
+       : '')
+    + '<li>Diesen Assistenten nochmal aufrufen: <code>python3 einrichten.py</code>, '
+    + 'oder im Fenster &bdquo;AHPT Cloud&ldquo; auf &bdquo;Einstellungen '
+    + '&auml;ndern&ldquo;. Er &uuml;bernimmt den letzten Stand.</li>'
     + '</ul>'
     + meldung('Du kannst dieses Fenster jetzt schlie&szlig;en. '
       + 'Der Agent l&auml;uft weiter.', 'gut'),
@@ -2212,7 +2326,18 @@ async function tuGeraetHinzufuegen() {
     const d = await jsonAn('/api/stand');
     stand = d.stand || {};
     $('#wo').textContent = 'laeuft auf ' + location.host;
-    zeigeWillkommen();
+    // Wer schon eingerichtet ist, faengt nicht wieder bei "Willkommen" an.
+    // Er kommt aus einem bestimmten Grund zurueck -- ein Geraet zulassen,
+    // den Webspace wechseln -- und findet beides auf der Schlussseite bzw.
+    // ueber die Leiste oben. Ein Assistent, der Eingerichtete durch neun
+    // Schritte schickt, wird beim zweiten Mal nicht mehr geoeffnet.
+    if (stand.relay_vorhanden && stand.agent_oeffentlich) {
+      fertigEingerichtet = true;
+      jetzt = SCHRITTE.length - 1;
+      zeigeFertig();
+    } else {
+      zeigeWillkommen();
+    }
   } catch (e) {
     document.body.innerHTML = '<pre>Konnte den Stand nicht laden: '
       + e.message + '</pre>';
