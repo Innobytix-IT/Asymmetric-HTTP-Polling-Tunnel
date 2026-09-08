@@ -410,6 +410,24 @@ def main():
                     'laeuft AHPT trotzdem zaeh, liegt es nicht an ihm.',
                     'gut')]
 
+            # WELCHE RICHTUNG BREMST -- das steht in den Zahlen schon
+            # drin und war bisher nur nicht abzulesen. Genau danach sucht
+            # aber, wer den Fehler eingrenzen will: Ein langsames Ablegen
+            # zeigt auf die eigene Leitung hinauf oder auf den Webspace
+            # beim Annehmen, ein langsames Zurueckholen auf die Ausgabe.
+            if e.get('ablegen_s') and e.get('abholen_s'):
+                hin, her = e['ablegen_s'], e['abholen_s']
+                welche = ('Beide Richtungen sind gleich schnell.'
+                          if 0.6 < hin / her < 1.7 else
+                          'Das Ablegen bremst -- also die Leitung von hier '
+                          'zum Webspace, oder er selbst beim Annehmen.'
+                          if hin > her else
+                          'Das Zurueckholen bremst -- also die Ausgabe des '
+                          'Webspace.')
+                zeilen.append((
+                    'Aufgeteilt: Ablegen %.1f s, Zurueckholen %.1f s. %s'
+                    % (hin, her, welche), 'gut'))
+
             # WAS DIE ZAHL BEDEUTET, muss danebenstehen. Sonst vergleicht
             # sie jemand mit dem Ergebnis eines DSL-Speedtests und haelt
             # seinen Webspace fuer kaputt: Der misst eine einzelne lange
