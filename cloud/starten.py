@@ -8,7 +8,7 @@ Copyright (C) 2026 Manuel Person, InnoBytix-IT
 
 WOZU
 ----
-Zwei Dinge, die vorher nur ueber eine Konsole gingen:
+Drei Dinge, die vorher nur ueber eine Konsole gingen -- oder gar nicht:
 
   1. Den Einrichtungs-Assistenten ueberhaupt starten. Wer AHPT Cloud auf
      einem Linux Mint oder einem Windows-Rechner benutzt, hat mit einer
@@ -17,6 +17,11 @@ Zwei Dinge, die vorher nur ueber eine Konsole gingen:
      NICHT ueber die Oberflaeche: Der Assistent kennt zwar `stop` und
      `status`, aber die Seite ruft nur `start` auf. Wer den Agenten
      loswerden wollte, brauchte den Task-Manager.
+  3. Nachsehen, ob der Vermittler noch mitspielt. Das ging bisher gar nicht,
+     und es fehlte an der wichtigsten Stelle: "AHPT ist langsam geworden"
+     hat bei freiem Webspace fast immer eine Ursache beim HOSTER -- gedrosselt
+     oder ueberbucht -- und die sieht man ihm nicht an. Wer nicht messen
+     kann, sucht den Fehler bei sich und findet ihn nie.
 
 ZWEI PROZESSE, DIE MAN NICHT VERWECHSELN DARF
 ----------------------------------------------
@@ -32,7 +37,8 @@ abschalten. Zum Anhalten gibt es hier einen Knopf.
 
 WAS DIESE DATEI AUSDRUECKLICH NICHT IST
 ----------------------------------------
-Kein zweiter Assistent. Jeder EINRICHTUNGS-Schritt, den es hier gaebe,
+Kein zweiter Assistent. Die Messung oben ist keiner: Sie richtet nichts
+ein, sie sieht nach. Jeder EINRICHTUNGS-Schritt, den es hier gaebe,
 muesste es zweimal geben: einmal in Tkinter und einmal im Browser. Zwei
 Oberflaechen fuer dieselbe Sache laufen auseinander, sobald man eine davon
 aendert -- und gepflegt wuerde am Ende nur eine. Hier steht deshalb nur, was
@@ -153,6 +159,7 @@ def main():
     except Exception as e:
         return ohne_oberflaeche('einrichten.py laesst sich nicht laden: %s' % e)
 
+    einrichten._stand = einrichten.stand_lesen()
     PID = os.path.join(einrichten.KONFIG_ORDNER, 'agent_privat.pid')
     KONFIG = os.path.join(einrichten.KONFIG_ORDNER, 'agent_privat.toml')
 
@@ -168,7 +175,7 @@ def main():
     fenster = tk.Tk()
     fenster.title('AHPT Cloud')
     fenster.configure(bg=GRUND)
-    fenster.minsize(580, 400)
+    fenster.minsize(580, 520)
 
     rahmen = tk.Frame(fenster, bg=GRUND, padx=24, pady=20)
     rahmen.pack(fill='both', expand=True)
@@ -247,6 +254,210 @@ def main():
         melde('Der Agent ist angehalten. Von unterwegs ist jetzt nichts '
               'mehr erreichbar.', WARN)
         zeichne()
+
+    # ------------------------------------------- Vermittler pruefen
+    #
+    # WARUM DAS HIER HINEINGEHOERT UND KEIN ZWEITER ASSISTENT IST
+    # -----------------------------------------------------------
+    # Es richtet nichts ein. Es ist eine DIAGNOSE, und die braucht man
+    # genau dann, wenn die Einrichtung laengst hinter einem liegt: "Warum
+    # ist AHPT seit ein paar Tagen so langsam?" Die Antwort steht nirgends
+    # -- der Webspace laedt, der Agent laeuft, und trotzdem kriecht alles.
+    #
+    # Ohne Messung sucht der Anwender den Fehler bei sich: im WLAN, im
+    # Handy, in der Konfiguration. Er findet ihn nie, weil er woanders
+    # liegt -- beim Hoster, der gedrosselt hat oder ueberbucht ist.
+
+    def messfenster():
+        w = tk.Toplevel(fenster)
+        w.title('Vermittler pruefen')
+        w.configure(bg=GRUND)
+        w.minsize(620, 520)
+        r = tk.Frame(w, bg=GRUND, padx=24, pady=20)
+        r.pack(fill='both', expand=True)
+
+        tk.Label(r, text='Vermittler pruefen', bg=GRUND, fg=AKZENT,
+                 font=SCHRIFT_GROSS, anchor='w').pack(fill='x')
+        tk.Label(r, text='Wie ein Speedtest, nur fuer den Webspace, ueber den '
+                         'AHPT laeuft: Antwortet er noch, wie flott, und ist '
+                         'er noch so schnell wie beim letzten Mal.',
+                 bg=GRUND, fg=LEISE, font=SCHRIFT, anchor='w', justify='left',
+                 wraplength=560).pack(fill='x', pady=(6, 14))
+
+        tk.Label(r, text='Adresse des Vermittlers', bg=GRUND, fg=TEXT,
+                 font=SCHRIFT, anchor='w').pack(fill='x')
+        feld = tk.Entry(r, bg=FLAECHE, fg=TEXT, font=SCHRIFT, relief='flat',
+                        insertbackground=AKZENT, highlightthickness=1,
+                        highlightbackground=FLAECHE, highlightcolor=AKZENT)
+        feld.pack(fill='x', pady=(4, 2), ipady=5)
+        vorgabe = (einrichten._stand.get('webspace')
+                   or einrichten._aus_agent_konfig().get('basis') or '')
+        feld.insert(0, vorgabe)
+        tk.Label(r, text='Vorbelegt ist der eingerichtete. Zum Vergleichen '
+                         'eine andere Adresse eintragen -- etwa einen zweiten '
+                         'Webspace, auf dem derselbe Vermittler liegt.',
+                 bg=GRUND, fg=LEISE, font=SCHRIFT, anchor='w', justify='left',
+                 wraplength=560).pack(fill='x', pady=(0, 12))
+
+        urteil = tk.Label(r, text='', bg=GRUND, fg=LEISE, font=SCHRIFT,
+                          anchor='w', justify='left', wraplength=560)
+        urteil.pack(fill='x')
+
+        tafel = tk.Frame(r, bg=GRUND)
+        tafel.pack(fill='x', pady=(12, 0))
+        felder = {}
+        for spalte, (kennung, titel, unten) in enumerate((
+            ('umlauf', 'Umlauf', 'Frage und Antwort'),
+            ('herunter', 'Herunter', 'vom Webspace'),
+            ('hinauf', 'Hinauf', 'zum Webspace'),
+            ('gesamt', 'Dauer', 'ganze Pruefung'),
+        )):
+            tafel.columnconfigure(spalte, weight=1, uniform='messwerte')
+            k = tk.Frame(tafel, bg=FLAECHE, padx=10, pady=10)
+            k.grid(row=0, column=spalte, sticky='nsew',
+                   padx=(0 if spalte == 0 else 6, 0))
+            tk.Label(k, text=titel, bg=FLAECHE, fg=LEISE,
+                     font=SCHRIFT).pack(anchor='w')
+            wert = tk.Label(k, text='--', bg=FLAECHE, fg=AKZENT,
+                            font=('TkFixedFont', 13, 'bold'))
+            wert.pack(anchor='w', pady=(2, 0))
+            klein = tk.Label(k, text=unten, bg=FLAECHE, fg=LEISE,
+                             font=('TkFixedFont', 8))
+            klein.pack(anchor='w')
+            # Der Ausgangstext wandert mit: Beim naechsten Durchgang muss
+            # auch die Kleinzeile zurueck. Sonst steht unter einem frisch
+            # geleerten "--" noch der Wert von vorhin -- und der sieht aus
+            # wie ein Messergebnis. Am 08.09.2026 genau so gesehen, als ein
+            # abgeschalteter Vermittler "22.24 MB/s" darunter stehen hatte.
+            felder[kennung] = (wert, klein, unten)
+
+        text = tk.Text(r, height=9, bg=FLAECHE, fg=TEXT, font=SCHRIFT,
+                       relief='flat', highlightthickness=0, wrap='word',
+                       padx=10, pady=8)
+        text.pack(fill='both', expand=True, pady=(12, 0))
+        text.tag_configure('warn', foreground=WARN)
+        text.tag_configure('gut', foreground=AKZENT)
+        text.configure(state='disabled')
+
+        leiste2 = tk.Frame(r, bg=GRUND)
+        leiste2.pack(fill='x', pady=(14, 0))
+        knopf(leiste2, 'Schliessen', w.destroy).pack(side='left')
+        los = knopf(leiste2, 'Messen', lambda: messen(), haupt=True)
+        los.pack(side='right')
+
+        def schreib(zeilen):
+            text.configure(state='normal')
+            text.delete('1.0', 'end')
+            for zeile, art in zeilen:
+                text.insert('end', zeile + '\n\n', art)
+            text.configure(state='disabled')
+
+        def fertig(e):
+            los.configure(state='normal', text='Nochmal messen')
+            farben = {'gut': AKZENT, 'lahm': WARN, 'gedrosselt': WARN,
+                      'teilweise': WARN, 'krank': FEHLER, 'weg': FEHLER}
+            koepfe = {
+                'gut': 'Der Vermittler ist in Ordnung.',
+                'lahm': 'Der Vermittler antwortet, aber langsam.',
+                'gedrosselt': 'Der Vermittler ist deutlich langsamer als '
+                              'frueher.',
+                'krank': 'Der Vermittler antwortet, kann aber nicht '
+                         'arbeiten.',
+                'teilweise': 'Der Vermittler antwortet, aber sein Tempo '
+                             'liess sich nicht messen.',
+                'weg': 'Der Vermittler ist nicht erreichbar.',
+            }
+            v = e.get('verdikt', 'weg')
+            urteil.configure(text=koepfe.get(v, v), fg=farben.get(v, LEISE))
+
+            def setz(kennung, gross, klein):
+                felder[kennung][0].configure(text=gross)
+                felder[kennung][1].configure(text=klein)
+
+
+            if 'umlauf_ms' in e:
+                # Die Aufteilung nur zeigen, wenn sie aufgeht -- siehe
+                # vermittler_messen(). Sonst nur der Gesamtwert; er ist der,
+                # auf den es ankommt.
+                setz('umlauf', '%.0f ms' % e['umlauf_ms'],
+                     ('Netz %.1f + PHP %.1f'
+                      % (e.get('tcp_ms') or 0, e['php_ms']))
+                     if e.get('php_ms') else 'Netz und PHP zusammen')
+            if e.get('herunter_bps'):
+                setz('herunter', '%.1f Mbit/s' % (e['herunter_bps'] * 8 / 1e6),
+                     '%.2f MB/s' % (e['herunter_bps'] / 1048576.0))
+            if e.get('hinauf_bps'):
+                setz('hinauf', '%.1f Mbit/s' % (e['hinauf_bps'] * 8 / 1e6),
+                     '%.2f MB/s' % (e['hinauf_bps'] / 1048576.0))
+            setz('gesamt', '%.1f s' % e.get('gesamt_s', 0),
+                 '%.1f MB bewegt'
+                 % ((e.get('herunter_bytes', 0) + e.get('hinauf_bytes', 0))
+                    / 1048576.0))
+
+            zeilen = [(s, 'warn') for s in e.get('saetze', [])]
+            zeilen += [(s, 'warn') for s in e.get('hinweise', [])]
+            if not zeilen:
+                # Auch der gute Fall braucht einen Satz. Eine leere Flaeche
+                # sieht aus wie ein halb fertiges Programm, nicht wie ein
+                # Ergebnis.
+                zeilen = [(
+                    'Nichts zu beanstanden. Antwortzeit und Tempo sind so, '
+                    'wie sie sein sollen -- laeuft AHPT trotzdem zaeh, liegt '
+                    'es nicht am Webspace.', 'gut')]
+            # Was AHPT davon hat -- die gemessenen Zahlen gelten je Richtung,
+            # und AHPT braucht beide nacheinander. Wer das nicht dazuschreibt,
+            # laesst den Anwender die doppelte Geschwindigkeit erwarten.
+            if e.get('herunter_bps') and e.get('hinauf_bps'):
+                langsamer = min(e['herunter_bps'], e['hinauf_bps'])
+                zeilen.append((
+                    'Was das fuer AHPT heisst: Jede Datei geht den Weg '
+                    'zweimal -- der Agent laedt sie hinauf, dein Geraet holt '
+                    'sie herunter. Es zaehlt also die langsamere Richtung '
+                    '(%s). Fuer 10 MB sind das rund %.1f Sekunden, plus die '
+                    'Wartezeit zwischen den Abfragen.'
+                    % (einrichten._tempo(langsamer, kurz=True),
+                       2 * 10 * 1048576 / langsamer), 'gut'))
+            schreib(zeilen)
+
+        def messen():
+            los.configure(state='disabled', text='Messen ...')
+            urteil.configure(text='', fg=LEISE)
+            for wert, klein, ausgang in felder.values():
+                wert.configure(text='--')
+                klein.configure(text=ausgang)
+            schreib([('Die Messung bewegt bis zu 16 MB. Auf einer langsamen '
+                      'Leitung dauert das eine Weile.', 'gut')])
+            adresse = feld.get().strip()
+
+            def lauf():
+                try:
+                    e = einrichten.vermittler_messen(
+                        adresse,
+                        melde=lambda t: w.after(0, urteil.configure,
+                                                {'text': t, 'fg': LEISE}))
+                except einrichten.EinrichtenFehler as ex:
+                    w.after(0, urteil.configure,
+                            {'text': 'Messung nicht moeglich.', 'fg': FEHLER})
+                    w.after(0, schreib, [(str(ex), 'warn')])
+                    w.after(0, los.configure, {'state': 'normal',
+                                               'text': 'Messen'})
+                    return
+                except Exception as ex:
+                    w.after(0, urteil.configure,
+                            {'text': 'Unerwarteter Fehler.', 'fg': FEHLER})
+                    w.after(0, schreib, [('%s: %s' % (type(ex).__name__, ex),
+                                          'warn')])
+                    w.after(0, los.configure, {'state': 'normal',
+                                               'text': 'Messen'})
+                    return
+                w.after(0, fertig, e)
+
+            threading.Thread(target=lauf, daemon=True).start()
+
+        schreib([('Auf "Messen" druecken. Der Vermittler wird angesprochen, '
+                  'dann wird in beide Richtungen gemessen -- das dauert etwa '
+                  'zehn Sekunden.', 'gut')])
+        feld.focus_set()
 
     # ------------------------------------------------- Assistent starten
 
@@ -378,6 +589,21 @@ def main():
                       'aus, bis du hier wieder auf Starten drueckst.',
                  bg=FLAECHE, fg=LEISE, font=SCHRIFT, anchor='w',
                  justify='left', wraplength=460).pack(fill='x', padx=(24, 0))
+
+        pruef = tk.Frame(inhalt, bg=FLAECHE, padx=14, pady=12)
+        pruef.pack(fill='x', pady=(8, 0))
+        zeile = tk.Frame(pruef, bg=FLAECHE)
+        zeile.pack(fill='x')
+        knopf(zeile, 'Vermittler pruefen', messfenster).pack(side='left')
+        tk.Label(zeile, text='  Antwortzeit und Tempo messen',
+                 bg=FLAECHE, fg=TEXT, font=SCHRIFT).pack(side='left')
+        tk.Label(pruef,
+                 text='Wenn AHPT langsam geworden ist, liegt es meistens '
+                      'nicht an dir: Freier Webspace wird gedrosselt oder ist '
+                      'ueberbucht. Das sieht man ihm nicht an -- messen muss '
+                      'man es.',
+                 bg=FLAECHE, fg=LEISE, font=SCHRIFT, anchor='w',
+                 justify='left', wraplength=460).pack(fill='x', pady=(8, 0))
 
         leiste = tk.Frame(inhalt, bg=GRUND)
         leiste.pack(fill='x', pady=(16, 0))

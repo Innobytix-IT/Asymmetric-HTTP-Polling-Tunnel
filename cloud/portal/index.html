@@ -182,6 +182,13 @@ code, .hex {
   font-size: 12.5px; word-break: break-all; color: var(--akzent-glut);
 }
 
+/* Das hidden-ATTRIBUT muss staerker sein als jede Klasse, die display
+   setzt. Der Browser bringt zwar `[hidden] { display: none }` mit, aber das
+   steht in SEINEM Stilblatt -- jede Regel hier schlaegt es, und `.leiste`
+   setzt display:flex. Am 08.09.2026 genau so passiert: Die Kopplungsknoepfe
+   standen von Anfang an da, obwohl sie erst nach einem Klick erscheinen
+   sollten. */
+[hidden] { display: none !important; }
 .leiste { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .brotkrumen { display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
               font-size: 14px; }
@@ -322,10 +329,41 @@ dialog::backdrop { background: rgba(0,0,0,.7); }
       Schluessel deines Agenten. Beides bleibt in diesem Browser.
     </p>
 
+    <!-- Der bequeme Weg zuerst: Er nimmt BEIDE Richtungen ab. Die
+         Verbindungsdatei darunter kann nur die eine, und die Handeingabe
+         ganz unten keine. -->
+    <div id="kasten-kopplung"
+         style="border:1px solid var(--rand-hell);border-radius:var(--radius);
+                background:var(--flaeche-hoch);padding:14px;margin-bottom:16px">
+      <b>Mit dem Assistenten koppeln</b>
+      <p class="klein" style="margin:6px 0 12px">
+        Der Einrichtungs-Assistent zeigt unter &bdquo;Weiteres Ger&auml;t
+        hinzuf&uuml;gen&ldquo; einen Kopplungscode. Damit richtet sich dieses
+        Portal selbst ein <b>und meldet seinen Schl&uuml;ssel zur&uuml;ck</b>
+        &ndash; in beide Richtungen nichts abzutippen.
+      </p>
+      <div class="leiste">
+        <button id="btn-kopplung-kamera" hidden>Code abfotografieren</button>
+        <button id="btn-kopplung-text">Kopplungstext einf&uuml;gen</button>
+      </div>
+      <video id="kopplung-video" hidden playsinline muted
+             style="width:100%;max-width:320px;margin-top:10px;border-radius:var(--radius);
+                    border:1px solid var(--rand-hell)"></video>
+      <textarea id="feld-kopplungstext" rows="3" hidden
+                style="margin-top:10px"
+                placeholder="Den Text aus dem Assistenten hier einf&uuml;gen"></textarea>
+      <div class="leiste" id="leiste-kopplungstext" hidden style="margin-top:8px">
+        <button class="haupt" id="btn-kopplung-los">Koppeln</button>
+        <button id="btn-kopplung-abbruch">Abbrechen</button>
+      </div>
+      <div class="klein" id="kopplung-stand" style="margin-top:8px"></div>
+    </div>
+
     <div class="reihe">
       <button id="btn-verbindungsdatei">Verbindungsdatei laden</button>
       <span class="klein">f&uuml;llt die zwei Felder unten aus dem
-        Assistenten aus &ndash; erspart Abtippen</span>
+        Assistenten aus &ndash; erspart Abtippen, meldet aber nichts
+        zur&uuml;ck</span>
     </div>
     <input type="file" id="feld-verbindungsdatei" accept="application/json,.json" hidden>
 
@@ -612,6 +650,240 @@ $('#btn-kopieren').onclick = async () => {
   try { await navigator.clipboard.writeText(w); melde('Kopiert.'); }
   catch (e) { $('#feld-eigen').select(); melde('Bitte von Hand kopieren.', 'warn'); }
 };
+
+/* ------------------------------------------- Kopplung mit dem Assistenten
+
+   WAS HIER ANDERS IST ALS BEI DER VERBINDUNGSDATEI
+   -------------------------------------------------
+   Die Verbindungsdatei bringt Adresse und Agent-Schluessel HERUEBER. Die
+   Rueckrichtung -- der oeffentliche Schluessel dieses Geraets muss zum
+   Agenten -- blieb bisher Handarbeit: abtippen, im Assistenten einfuegen.
+   Die App macht das seit dem 07.09.2026 selbst, das Portal nicht. Genau
+   diese Luecke schliesst der Block hier.
+
+   WARUM ES DIE DATEI NICHT KANN
+   ------------------------------
+   Zum Zurueckmelden braucht es das Zugangs-Token des Assistenten, und das
+   gehoert nicht in eine Datei: Sie bleibt im Download-Ordner liegen, der
+   Assistent laeuft laengst nicht mehr, das Token steht trotzdem noch da.
+   Der Kopplungscode dagegen lebt nur, solange der Assistent laeuft.
+
+   ZWEI WEGE, EIN INHALT
+   ----------------------
+   Kamera oder Text -- beides ergibt dieselben vier Werte. Die Kamera ist
+   schoener, wenn Assistent und Portal auf verschiedenen Geraeten laufen.
+   Sitzen beide auf demselben Rechner, ist Kopieren der kuerzere Weg, als
+   eine Kamera auf den eigenen Bildschirm zu halten -- und viele Browser
+   koennen ohnehin keine QR-Codes lesen. */
+
+function kopplungStand(text, art) {
+  const d = $('#kopplung-stand');
+  d.innerHTML = text;
+  d.style.color = art === 'fehler' ? 'var(--fehler)'
+                : art === 'gut' ? 'var(--akzent)' : 'var(--leise)';
+}
+
+function geraetename() {
+  // Nur damit im Assistenten nicht "Unbenanntes Geraet" steht. Der Wert
+  // dient der Wiedererkennung, sonst nichts -- er landet in keiner Datei.
+  const p = (navigator.userAgentData && navigator.userAgentData.platform)
+            || navigator.platform || '';
+  return ('Portal' + (p ? ' auf ' + p : '')).slice(0, 60);
+}
+
+/* Den Inhalt eines Kopplungscodes lesen -- dieselbe Pruefung wie in der App
+   (Kopplung.kt). Eine Absage soll sagen, WAS fehlt: "ungueltig" laesst den
+   Nutzer raten, ob er den falschen Code erwischt hat oder etwas kaputt ist. */
+function kopplungLesen(roh) {
+  let o;
+  try { o = JSON.parse(String(roh).trim()); }
+  catch (e) {
+    throw new Error('Das ist kein AHPT-Kopplungscode. Der Assistent zeigt '
+                    + 'ihn unter „Weiteres Ger&auml;t hinzuf&uuml;gen".');
+  }
+  const basis = String(o.b || '').replace(/\/+$/, '');
+  const agent = String(o.a || '').toLowerCase();
+  const token = String(o.t || '');
+  const adressen = Array.isArray(o.h) ? o.h.filter(x => typeof x === 'string' && x) : [];
+  if (!basis) throw new Error('Im Code fehlt die Adresse des Vermittlers.');
+  if (!/^[0-9a-f]{64}$/.test(agent))
+    throw new Error('Im Code fehlt der Schl&uuml;ssel des Agenten, oder er '
+                    + 'ist unvollst&auml;ndig.');
+  if (!token) throw new Error('Im Code fehlt das Zugangs-Token des Assistenten.');
+  if (!adressen.length) throw new Error('Im Code steht keine Adresse des Assistenten.');
+  return { basis, agent, token, adressen };
+}
+
+/* Den eigenen oeffentlichen Schluessel beim Assistenten anmelden.
+
+   Alle Adressen der Reihe nach, die erste die antwortet gewinnt -- der
+   Assistent weiss beim Anzeigen des Codes noch nicht, ueber welchen Weg
+   dieses Geraet zurueckkommt (WLAN, Kabel, derselbe Rechner). */
+async function meldeBeimAssistenten(k, eigenerHex) {
+  const gruende = [];
+  for (const adresse of k.adressen) {
+    let a;
+    try {
+      a = await fetch('http://' + adresse + '/api/koppeln?t='
+                      + encodeURIComponent(k.token), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schluessel: eigenerHex, geraet: geraetename() }),
+        // Kein Cookie mitschicken: Das Token steht in der Adresse, und
+        // Anmeldedaten vertragen sich nicht mit einer Freigabe fuer alle.
+        credentials: 'omit',
+        redirect: 'error',
+      });
+    } catch (e) {
+      gruende.push(adresse);
+      continue;
+    }
+    let d = {};
+    try { d = await a.json(); } catch (e) {}
+    if (a.ok) return d;
+    // Ein ANTWORTENDER Assistent, der ablehnt, ist etwas anderes als einer,
+    // den wir nicht erreichen. Weitersuchen waere sinnlos, und seine
+    // Begruendung ist die brauchbarste Meldung, die es gibt.
+    throw new Error(d.fehler || ('Der Assistent hat abgelehnt (HTTP ' + a.status + ').'));
+  }
+  throw new Error('Der Assistent war unter keiner seiner Adressen erreichbar ('
+                  + esc(gruende.join(', ')) + '). Meist heisst das: Dieses '
+                  + 'Ger&auml;t und der Rechner mit dem Assistenten h&auml;ngen '
+                  + 'nicht im selben Netz. Oder der Assistent l&auml;uft nicht '
+                  + 'mehr &ndash; er endet, wenn man sein Fenster schliesst.');
+}
+
+async function kopplungAnwenden(roh) {
+  let k;
+  try { k = kopplungLesen(roh); }
+  catch (e) { kopplungStand(e.message, 'fehler'); return false; }
+
+  $('#feld-basis').value = k.basis;
+  $('#feld-agent').value = k.agent;
+  schreib(SPEICHER.basis, k.basis);
+  schreib(SPEICHER.agent, k.agent);
+
+  // Schluessel nur erzeugen, wenn es noch keinen gibt. Ein neuer machte die
+  // bestehende Paarung ungueltig -- derselbe Fehler, vor dem der Knopf
+  // daneben seit dem 03.09.2026 ausdruecklich warnt.
+  let priv = lies(SPEICHER.privat);
+  if (!priv) {
+    kopplungStand('Schl&uuml;ssel wird erzeugt &hellip;');
+    const p = await schluesselpaar();
+    priv = bytesZuHex(p.roh);
+    schreib(SPEICHER.privat, priv);
+  }
+  const eigenerHex = bytesZuHex(await oeffentlichZu(hexZuBytes(priv)));
+  $('#feld-eigen').value = eigenerHex;
+  knopfAnpassen();
+
+  kopplungStand('Melde diesen Schl&uuml;ssel beim Assistenten an &hellip;');
+  try {
+    const d = await meldeBeimAssistenten(k, eigenerHex);
+    kopplungStand(d.war_schon_da
+      ? 'Der Assistent kannte dieses Ger&auml;t schon. Alles steht.'
+      : 'Angemeldet als „' + esc(d.geraet || geraetename()) + '". Der Agent '
+        + 'wurde neu gestartet und kennt dieses Ger&auml;t jetzt.', 'gut');
+  } catch (e) {
+    // Eingerichtet ist das Portal trotzdem -- nur die Rueckmeldung fehlt.
+    // Das muss dastehen, sonst faengt der Nutzer wieder von vorne an.
+    kopplungStand(e.message + '<br><br>Adresse und Agent-Schl&uuml;ssel sind '
+      + 'trotzdem eingetragen. Es fehlt nur die R&uuml;ckmeldung: Den Wert '
+      + 'unter „&Ouml;ffentlicher Schl&uuml;ssel dieses Ger&auml;ts" von Hand '
+      + 'in den Assistenten &uuml;bertragen.', 'fehler');
+    return false;
+  }
+  return true;
+}
+
+/* ---- Weg 1: Text einfuegen */
+$('#btn-kopplung-text').onclick = () => {
+  kameraAus();
+  $('#feld-kopplungstext').hidden = false;
+  $('#leiste-kopplungstext').hidden = false;
+  $('#feld-kopplungstext').focus();
+  kopplungStand('');
+};
+$('#btn-kopplung-abbruch').onclick = () => {
+  $('#feld-kopplungstext').hidden = true;
+  $('#leiste-kopplungstext').hidden = true;
+  $('#feld-kopplungstext').value = '';
+  kopplungStand('');
+};
+$('#btn-kopplung-los').onclick = async () => {
+  const k = $('#btn-kopplung-los');
+  k.disabled = true;
+  try {
+    if (await kopplungAnwenden($('#feld-kopplungstext').value)) {
+      $('#feld-kopplungstext').value = '';
+      $('#feld-kopplungstext').hidden = true;
+      $('#leiste-kopplungstext').hidden = true;
+      await verbinden();
+    }
+  } finally { k.disabled = false; }
+};
+
+/* ---- Weg 2: Kamera
+
+   BarcodeDetector gibt es nicht ueberall -- Firefox und Safari kennen es
+   nicht. Deshalb wird der Knopf erst eingeblendet, wenn feststeht, dass er
+   auch etwas tut: Ein Knopf, der beim Druecken "geht hier nicht" sagt, ist
+   schlimmer als keiner. Der Textweg daneben funktioniert immer. */
+let kameraStrom = null;
+
+function kameraAus() {
+  if (kameraStrom) {
+    kameraStrom.getTracks().forEach(t => t.stop());
+    kameraStrom = null;
+  }
+  const v = $('#kopplung-video');
+  if (v) { v.hidden = true; v.srcObject = null; }
+}
+
+(async () => {
+  if (!('BarcodeDetector' in window) || !navigator.mediaDevices) return;
+  let formate = [];
+  try { formate = await window.BarcodeDetector.getSupportedFormats(); }
+  catch (e) { return; }
+  if (!formate.includes('qr_code')) return;
+  $('#btn-kopplung-kamera').hidden = false;
+})();
+
+$('#btn-kopplung-kamera').onclick = async () => {
+  if (kameraStrom) { kameraAus(); kopplungStand(''); return; }
+  const v = $('#kopplung-video');
+  try {
+    kameraStrom = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' } });
+  } catch (e) {
+    kopplungStand('Die Kamera l&auml;sst sich nicht &ouml;ffnen (' + esc(e.name)
+      + '). Der Textweg daneben funktioniert ohne sie.', 'fehler');
+    return;
+  }
+  v.hidden = false;
+  v.srcObject = kameraStrom;
+  await v.play();
+  kopplungStand('Den Code des Assistenten ins Bild halten &hellip;');
+
+  const leser = new window.BarcodeDetector({ formats: ['qr_code'] });
+  const suche = async () => {
+    if (!kameraStrom) return;
+    let treffer = [];
+    try { treffer = await leser.detect(v); } catch (e) { treffer = []; }
+    if (treffer.length) {
+      const roh = treffer[0].rawValue;
+      kameraAus();
+      if (await kopplungAnwenden(roh)) await verbinden();
+      return;
+    }
+    setTimeout(suche, 250);
+  };
+  suche();
+};
+
+// Kamera nicht weiterlaufen lassen, wenn die Karte zugeht -- ein
+// vergessenes Kamerabild ist eine unangenehme Ueberraschung.
+window.addEventListener('pagehide', kameraAus);
 
 $('#btn-verbindungsdatei').onclick = () => $('#feld-verbindungsdatei').click();
 $('#feld-verbindungsdatei').onchange = async ev => {

@@ -45,6 +45,7 @@ SICHERHEIT
 """
 
 import argparse
+import http.client
 import ipaddress
 import io
 import json
@@ -76,6 +77,11 @@ STANDDATEI = os.path.join(KONFIG_ORDNER, 'einrichten_stand.json')
 _schloss = threading.Lock()
 _token = None
 _port = 8771      # wird beim Start auf den tatsaechlichen Wert gesetzt
+# Lauscht der Assistent nur auf 127.0.0.1? Dann duerfen im Kopplungscode
+# auch nur 127.0.0.1 stehen. Die LAN-Adressen dort zu nennen hiesse, ein
+# Geraet vier Sekunden je Adresse ins Leere laufen zu lassen, bevor es die
+# einzige erreicht, die antwortet -- und auf einem anderen Geraet gar nicht.
+_nur_localhost = False
 _stand = {}
 
 
@@ -268,6 +274,42 @@ def schritt_ftp(daten):
             'weiter': 'hochladen'}
 
 
+# So und nicht anders sehen die beiden Dateien auf dem Webspace aus.
+#
+# ZEILE EINS SCHUETZT, ZEILE ZWEI TRAEGT DEN INHALT. relay.php liest sie mit
+# lies_geschuetzt(): erste Zeile weg, Rest ist der Wert. Die Schutzzeile ist
+# noetig, weil beide Dateien im Web-Ordner liegen -- ruft jemand sie direkt
+# auf, fuehrt PHP sie aus, und `exit` sorgt dafuer, dass dabei NICHTS
+# herauskommt. Ohne sie stuende das Geheimnis im Browser.
+#
+# HIER STAND BIS ZUM 08.09.2026 ETWAS ANDERES, und zwar
+# `<?php return "<geheimnis>";` -- eine Datei, die PHP zwar klaglos frisst,
+# aus der lies_geschuetzt() aber IMMER eine leere Zeichenkette macht: Es
+# nimmt alles ab der ersten Zeilenschaltung, und hier gab es keine. Damit
+# war agent_erlaubt() dauerhaft falsch, der Agent durfte auf dem Vermittler
+# nichts ablegen, und AHPT lieferte auf jede Frage nie eine Antwort.
+#
+# Betroffen war JEDE ueber den Assistenten eingerichtete Anlage -- beide
+# Wege, FTP wie Hand-Upload. Nicht betroffen waren die aelteren, die mit
+# ausliefern.sh entstanden: Das Skript baut die Datei richtig und prueft die
+# Schutzzeile sogar nach (`head -1 ... | grep exit`). Genau deshalb ist es
+# so lange niemandem aufgefallen.
+#
+# Gefunden beim Erproben der Vermittler-Messung, die dieselbe Anmeldung
+# benutzt: Sie bekam mit dem RICHTIGEN Geheimnis ein 403.
+SCHUTZZEILE = b'<?php exit; ?>\n'
+
+
+def _token_datei(geheimnis):
+    return SCHUTZZEILE + geheimnis.encode('ascii') + b'\n'
+
+
+def _zustand_datei():
+    # Leeres JSON-Objekt, nicht leere Liste: relay.php erwartet dahinter ein
+    # Objekt und faellt sonst auf seinen Ersatzwert zurueck.
+    return SCHUTZZEILE + b'{}\n'
+
+
 def schritt_hochladen(daten):
     """relay.php und .htaccess auf den Webspace hochladen."""
     roh_ordner = (daten.get('fernordner') or '/privat').strip()
@@ -308,11 +350,8 @@ def schritt_hochladen(daten):
     with open(geheimnis_datei, 'rb') as f:
         geheimnis = f.read().decode('ascii').strip()
 
-    # relay_token.php: PHP-Datei, die das Geheimnis enthaelt.
-    token_php = ('<?php return %s;' % json.dumps(geheimnis)).encode('utf-8')
-
-    # relay_state.php: leerer Ausgangszustand.
-    state_php = b'<?php return ["stand" => 0, "warteschlange" => []];'
+    token_php = _token_datei(geheimnis)
+    state_php = _zustand_datei()
 
     hoch = [
         ('relay.php', open(quelle, 'rb').read()),
@@ -388,8 +427,8 @@ def vermittler_paket():
 
     dateien = [
         ('relay.php', open(quelle, 'rb').read()),
-        ('relay_token.php', ('<?php return %s;' % json.dumps(geheimnis)).encode('utf-8')),
-        ('relay_state.php', b'<?php return ["stand" => 0, "warteschlange" => []];'),
+        ('relay_token.php', _token_datei(geheimnis)),
+        ('relay_state.php', _zustand_datei()),
     ]
     htaccess = os.path.join(HIER, 'htaccess-beispiel')
     if os.path.isfile(htaccess):
@@ -591,6 +630,467 @@ def _relay_selbsttest(basis):
         return d
     except Exception:
         return None
+
+
+# ------------------------------------------------------- Vermittler messen
+#
+# WOZU DAS HIER STEHT UND NICHT IN starten.py
+# --------------------------------------------
+# Die Oberflaeche soll messen KOENNEN, aber nicht WISSEN, wie gemessen wird.
+# Steht die Logik hier, benutzen Fenster und Browserseite dieselbe -- und es
+# gibt nur eine Stelle, die richtig sein muss.
+#
+# WAS DIESE MESSUNG BEANTWORTET
+# ------------------------------
+# Nicht "wie schnell ist mein Internet" -- das sagt jeder Speedtest. Sondern:
+# LEBT DER VERMITTLER NOCH, und ist er noch so schnell wie neulich? Bei
+# kostenlosem Webspace ist das die haeufigste Ursache fuer "AHPT ist so
+# langsam geworden", und sie ist von aussen unsichtbar: Die Seite laedt, der
+# Selbsttest sagt "ok", und trotzdem braucht eine Datei zehn Minuten. Wer das
+# nicht messen kann, sucht den Fehler bei sich -- im WLAN, im Agenten, im
+# Handy -- und findet ihn nie.
+#
+# VIER WERTE, UND JEDER SAGT ETWAS ANDERES
+# -----------------------------------------
+#   TCP        Wie lange die blosse Verbindungsaufnahme dauert. Das ist der
+#              NETZWEG, ohne jede Rechenarbeit des Hosters.
+#   Umlauf     Dasselbe plus PHP: Der Vermittler muss anlaufen, zwei Dateien
+#              lesen und antworten. Genau diesen Umlauf macht der Agent
+#              mehrmals je Sekunde -- er bestimmt, wie flott sich AHPT
+#              anfuehlt, ganz unabhaengig von der Bandbreite.
+#   Herunter   Was vom Webspace hierher fliesst.
+#   Hinauf     Was von hier zum Webspace fliesst.
+#
+# Der Vergleich der ersten beiden ist der eigentliche Befund: 20 ms TCP und
+# 900 ms Umlauf heisst, die Leitung ist in Ordnung und der HOSTER ist am
+# Ende. Umgekehrt heisst es, das Netz dazwischen taugt nichts.
+#
+# BEIDE RICHTUNGEN, WEIL AHPT BEIDE BRAUCHT
+# ------------------------------------------
+# Jedes Byte legt den Weg zweimal zurueck: Der Agent laedt es HINAUF, der
+# Client holt es HERUNTER. Die langsamere der beiden Richtungen bestimmt das
+# Tempo -- und bei Webspace ist das fast immer das Hinauf.
+
+MESSUNG_MAX = 8 * 1024 * 1024        # Bytes -- muss zu MESSUNG_MAX in relay.php passen
+MESSUNG_ZIEL_S = 2.5                 # so lange soll ein Durchgang dauern
+MESSUNG_DATEI = os.path.join(KONFIG_ORDNER, 'messungen.json')
+
+
+def _geheimnis_lesen():
+    """Das gemeinsame Geheimnis -- zum Benutzen, nicht zum Anzeigen.
+
+    Es wandert ausschliesslich in einen Kopfeintrag und wird nirgends
+    ausgegeben, protokolliert oder zurueckgeliefert. Wer es sehen will, muss
+    die Datei selbst aufmachen.
+    """
+    pfad = os.path.join(KONFIG_ORDNER, 'geheimnis_privat')
+    if not os.path.isfile(pfad):
+        raise EinrichtenFehler(
+            'Das gemeinsame Geheimnis fehlt (%s). Ohne es laesst sich beim '
+            'Vermittler nichts messen -- die Messung ist angemeldet, damit '
+            'sie nicht jeder Fremde ausloesen kann. Die Datei entsteht im '
+            'Schritt "Vermittler".' % pfad)
+    with open(pfad, 'rb') as f:
+        wert = f.read().decode('ascii', 'replace').strip()
+    if len(wert) < 16:
+        raise EinrichtenFehler(
+            'Das Geheimnis in %s ist zu kurz (%d Zeichen, noetig sind 16). '
+            'Der Vermittler wuerde es ebenfalls abweisen.' % (pfad, len(wert)))
+    return wert
+
+
+def _messung_tcp_ms(basis, versuche=3):
+    """Reine Verbindungszeit, ohne PHP -- der Netzweg allein.
+
+    Kein ICMP: Das braucht auf manchen Systemen Sonderrechte, und viele
+    Hoster verwerfen es ohnehin. Ein TCP-Handschlag zum Webserver geht immer
+    und misst denselben Weg. Von mehreren Versuchen zaehlt der schnellste --
+    ein einzelner Ausreisser nach oben sagt nichts ueber die Strecke.
+    """
+    u = urllib.parse.urlparse(basis)
+    port = u.port or (443 if u.scheme == 'https' else 80)
+    wirt = u.hostname
+    if not wirt:
+        return None
+    zeiten = []
+    fehl = 0
+    # Ein Versuch mehr als gezaehlt: Der erste traegt Namensaufloesung, ARP
+    # und Routenwahl und misst damit alles Moegliche ausser der Strecke. Am
+    # 08.09.2026 kam deshalb ein TCP-Wert HOEHER als der ganze Umlauf heraus
+    # -- der Teil groesser als das Ganze, und das sah nach einem Defekt aus.
+    for i in range(versuche + 1):
+        t0 = time.perf_counter()
+        try:
+            s = socket.create_connection((wirt, port), timeout=6)
+            if i:
+                zeiten.append((time.perf_counter() - t0) * 1000.0)
+            s.close()
+        except OSError:
+            fehl += 1
+            # Nach zwei Fehlschlaegen ohne einen einzigen Erfolg aufhoeren.
+            # Ein Rechner, der nicht antwortet, laesst jeden Versuch in den
+            # vollen Zeitablauf laufen -- vier davon sind eine halbe Minute,
+            # in der die Oberflaeche nur "Verbindung aufbauen ..." sagt. Die
+            # Auskunft wird davon nicht besser: Zweimal nichts ist dieselbe
+            # Auskunft wie viermal nichts.
+            if fehl >= 2 and not zeiten:
+                return None
+    return min(zeiten) if zeiten else None
+
+
+class _Messverbindung:
+    """Eine offene Verbindung fuer mehrere Durchgaenge.
+
+    Je Durchgang neu aufzubauen hiesse, jedes Mal den Handschlag mitzumessen
+    -- bei kurzen Durchgaengen ist der groesser als der Rest. Und TCP faengt
+    langsam an (slow start): Die ersten Zehntelsekunden einer frischen
+    Verbindung sind nie das, was die Leitung wirklich kann.
+    """
+
+    def __init__(self, basis):
+        u = urllib.parse.urlparse(basis)
+        self.pfad = u.path.rstrip('/')
+        self.zertifikat_ungeprueft = False
+        if u.scheme == 'https':
+            import ssl
+            try:
+                self.v = http.client.HTTPSConnection(u.netloc, timeout=45)
+                self.v.connect()
+            except ssl.SSLError:
+                # Selbstsignierte Zertifikate sind auf Freihosting die Regel
+                # -- am 07.09.2026 stolperte schon der FTP-Schritt darueber.
+                # Gemessen wird trotzdem; die Oberflaeche sagt es dazu.
+                self.v = http.client.HTTPSConnection(
+                    u.netloc, timeout=45,
+                    context=ssl._create_unverified_context())
+                self.v.connect()
+                self.zertifikat_ungeprueft = True
+        else:
+            self.v = http.client.HTTPConnection(u.netloc, timeout=45)
+            self.v.connect()
+
+    def zu(self):
+        try:
+            self.v.close()
+        except Exception:
+            pass
+
+    def herunter(self, geheimnis, wieviel):
+        """Bytes holen. Zurueck: (gelesen, Sekunden, HTTP-Kode)."""
+        t0 = time.perf_counter()
+        self.v.request(
+            'GET',
+            '%s/relay.php?action=messung&bytes=%d' % (self.pfad, wieviel),
+            headers={'X-AHPT-Auth': geheimnis,
+                     # Ohne das darf der Server komprimieren, und dann misst
+                     # man seine Rechenleistung statt der Leitung.
+                     'Accept-Encoding': 'identity'})
+        r = self.v.getresponse()
+        gelesen = 0
+        while True:
+            s = r.read(65536)
+            if not s:
+                break
+            gelesen += len(s)
+        return gelesen, time.perf_counter() - t0, r.status
+
+    def hinauf(self, geheimnis, wieviel):
+        """Bytes schicken. Zurueck: (bestaetigt, Sekunden, HTTP-Kode)."""
+        # os.urandom statt Nullen: Nullen presst jedes mod_deflate auf nichts
+        # zusammen, und die Messung meldete das Zehnfache der Wahrheit.
+        nutzlast = os.urandom(wieviel)
+        t0 = time.perf_counter()
+        self.v.request(
+            'POST', '%s/relay.php?action=messung' % self.pfad, body=nutzlast,
+            headers={'X-AHPT-Auth': geheimnis,
+                     'Content-Type': 'application/octet-stream',
+                     'Content-Length': str(wieviel)})
+        r = self.v.getresponse()
+        roh = r.read()
+        dauer = time.perf_counter() - t0
+        bestaetigt = 0
+        try:
+            bestaetigt = int(json.loads(roh).get('empfangen') or 0)
+        except Exception:
+            pass
+        return bestaetigt, dauer, r.status
+
+
+def _naechste_groesse(bytes_, sekunden, deckel):
+    """Wie gross der naechste Durchgang sein soll, damit er lange genug dauert.
+
+    Ein Durchgang von zwei Zehntelsekunden misst vor allem Zufall. Also aus
+    dem Probelauf hochrechnen, was in MESSUNG_ZIEL_S passt.
+    """
+    if sekunden <= 0:
+        return deckel
+    ziel = int(bytes_ / sekunden * MESSUNG_ZIEL_S)
+    return max(512 * 1024, min(deckel, ziel))
+
+
+def _messungen_lesen():
+    try:
+        with open(MESSUNG_DATEI, encoding='utf-8') as f:
+            d = json.load(f)
+        return d if isinstance(d, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _messung_merken(eintrag):
+    """Verlauf fortschreiben.
+
+    OHNE VERLAUF IST "GEDROSSELT" NICHT ZU ERKENNEN. Eine einzelne Zahl sagt
+    nur, wie schnell es GERADE ist; ob das viel oder wenig ist, weiss allein
+    wer den frueheren Wert desselben Vermittlers kennt. Und genau das ist der
+    Fall, den der Anwender sucht -- "es war doch immer schnell".
+    """
+    liste = _messungen_lesen()
+    liste.append(eintrag)
+    del liste[:-50]
+    try:
+        os.makedirs(KONFIG_ORDNER, exist_ok=True)
+        tmp = MESSUNG_DATEI + '.neu'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(liste, f, indent=1)
+        os.replace(tmp, MESSUNG_DATEI)
+    except OSError:
+        pass       # ein fehlender Verlauf ist kein Grund, die Messung zu verwerfen
+    return liste
+
+
+def _tempo(bps, kurz=False):
+    """Bytes je Sekunde lesbar machen -- in beiden Einheiten.
+
+    MB/s versteht jeder, der schon einmal eine Datei kopiert hat. Mbit/s
+    steht im Vertrag mit dem Anbieter. Wer nur eins zeigt, laesst die Haelfte
+    der Leute rechnen.
+
+    `kurz` fuer Stellen, die selbst schon in einer Klammer stehen -- eine
+    Klammer in der Klammer liest niemand gern.
+    """
+    if not bps:
+        return 'nichts'
+    if kurz:
+        return '%.1f Mbit/s' % (bps * 8 / 1e6)
+    return '%.1f Mbit/s (%.2f MB/s)' % (bps * 8 / 1e6, bps / 1048576.0)
+
+
+def _vergleich_mit_frueher(adresse, jetzt_bps):
+    """Ist es langsamer geworden? Zurueck: (Satz oder None, bester Wert)."""
+    frueher = [m for m in _messungen_lesen()
+               if m.get('adresse') == adresse and m.get('herunter_bps')]
+    if len(frueher) < 2 or not jetzt_bps:
+        return None, None
+    best = max(m['herunter_bps'] for m in frueher)
+    if jetzt_bps < best * 0.4:
+        return ('Derselbe Vermittler schaffte hier frueher schon %s, jetzt '
+                'sind es %s -- weniger als die Haelfte. Das sieht nach einer '
+                'Drosselung aus, oder der Webspace ist gerade ueberlastet.'
+                % (_tempo(best), _tempo(jetzt_bps))), best
+    return None, best
+
+
+def vermittler_messen(adresse=None, melde=None, deckel=MESSUNG_MAX):
+    """Misst einen Vermittler und faellt ein Urteil.
+
+    `melde` bekommt kurze Saetze zum Fortschritt -- eine Messung dauert um
+    die zehn Sekunden, und ein Fenster, das so lange nichts sagt, sieht
+    abgestuerzt aus.
+
+    Die Reihenfolge ist Absicht: erst der billigste Test, dann der teuerste.
+    Wer schon beim Verbindungsaufbau scheitert, soll nicht erst acht Megabyte
+    lang darauf warten, dass es auch weiterhin nicht geht.
+    """
+    def sag(t):
+        if melde:
+            melde(t)
+
+    roh = (adresse or '').strip()
+    if not roh:
+        roh = _stand.get('webspace') or _aus_agent_konfig().get('basis') or ''
+    if not roh:
+        raise EinrichtenFehler(
+            'Es ist kein Vermittler eingerichtet, und es wurde auch keine '
+            'Adresse angegeben. Zu messen gibt es damit nichts.')
+    basis = _adresse_normalisieren(roh)
+    geheimnis = _geheimnis_lesen()
+
+    gestartet = time.perf_counter()
+    e = {'adresse': basis, 'zeit': time.time(), 'saetze': [], 'hinweise': []}
+
+    # ---- 1. Netzweg allein
+    sag('Verbindung aufbauen ...')
+    e['tcp_ms'] = _messung_tcp_ms(basis)
+    if e['tcp_ms'] is None:
+        e['verdikt'] = 'weg'
+        e['gesamt_s'] = time.perf_counter() - gestartet
+        e['saetze'].append(
+            'Unter %s nimmt niemand eine Verbindung an. Entweder stimmt die '
+            'Adresse nicht, der Webspace ist abgeschaltet, oder dieses '
+            'Geraet hat gerade kein Internet.' % basis)
+        return e
+
+    # ---- 2. Umlauf: derselbe Weg, aber mit PHP am anderen Ende
+    sag('Vermittler ansprechen ...')
+    umlaeufe, selbsttest = [], None
+    for _ in range(5):
+        t0 = time.perf_counter()
+        d = _relay_selbsttest(basis)
+        if d is None:
+            continue
+        umlaeufe.append((time.perf_counter() - t0) * 1000.0)
+        selbsttest = d
+    e['selbsttest'] = selbsttest
+    if not umlaeufe:
+        e['verdikt'] = 'weg'
+        e['gesamt_s'] = time.perf_counter() - gestartet
+        e['saetze'].append(
+            'Der Webserver antwortet (%.0f ms), aber unter %s/relay.php '
+            'sitzt kein Vermittler. Entweder liegt er in einem anderen '
+            'Ordner, oder der Hoster hat PHP abgeschaltet.'
+            % (e['tcp_ms'], basis))
+        return e
+    e['umlauf_ms'] = min(umlaeufe)
+    e['umlauf_mittel_ms'] = sum(umlaeufe) / len(umlaeufe)
+    # Schwankung eigens ausweisen: Ein Wert, der zwischen 80 und 2000 ms
+    # springt, ist ein ueberbuchter Server -- am Mittelwert allein sieht man
+    # davon nichts.
+    e['umlauf_streuung_ms'] = max(umlaeufe) - min(umlaeufe)
+    # Nur aufteilen, wenn die Aufteilung ueberhaupt aufgeht. Beide Werte
+    # stammen aus verschiedenen Messreihen; auf einer schwankenden Leitung
+    # kann der Umlauf zufaellig unter dem TCP-Wert landen. Dann ist ein
+    # errechneter PHP-Anteil von "0,0 ms" keine Auskunft, sondern eine
+    # erfundene -- also lieber keine.
+    e['php_ms'] = (e['umlauf_ms'] - e['tcp_ms']
+                   if e['umlauf_ms'] > e['tcp_ms'] else None)
+
+    if selbsttest and not selbsttest.get('ablage_schreib', True):
+        e['hinweise'].append(
+            'Der Vermittler darf in seinen Ablage-Ordner nicht schreiben. '
+            'Damit uebertraegt AHPT gar nichts, egal wie schnell die Leitung '
+            'ist. Die Rechte des Ordners ahpt/ pruefen.')
+    if selbsttest and selbsttest.get('verdraengt'):
+        e['hinweise'].append(
+            'Die Warteschlange musste schon %d mal einen Platz verdraengen. '
+            'Entweder holt der Agent zu selten ab, oder jemand von aussen '
+            'belegt Plaetze.' % selbsttest['verdraengt'])
+
+    # Kann dieser Vermittler ueberhaupt messen? Der Selbsttest sagt es. Bei
+    # einem aelteren fehlt das Feld -- dann ist der Fehlschlag weiter unten
+    # kein Defekt, sondern nur ein alter Stand, und das soll dastehen.
+    kann_messen = bool(selbsttest and selbsttest.get('messung_max'))
+    if kann_messen:
+        deckel = min(deckel, int(selbsttest['messung_max']))
+
+    verbindung = None
+    try:
+        verbindung = _Messverbindung(basis)
+        if verbindung.zertifikat_ungeprueft:
+            e['hinweise'].append(
+                'Das TLS-Zertifikat dieses Webspace liess sich nicht pruefen '
+                '(selbstsigniert). Gemessen wurde trotzdem.')
+
+        # ---- 3. Herunter
+        sag('Herunterladen messen ...')
+        n, s, kode = verbindung.herunter(geheimnis, 256 * 1024)
+        if kode == 403:
+            e['hinweise'].append(
+                'Der Vermittler weist die Messung ab: Sein Geheimnis ist ein '
+                'anderes als das hier hinterlegte. Bei einem FREMDEN '
+                'Vermittler ist das der Normalfall -- dann lassen sich nur '
+                'Erreichbarkeit und Umlauf messen, nicht das Tempo.')
+        elif kode != 200 or not kann_messen:
+            e['hinweise'].append(
+                'Dieser Vermittler kennt die Messung noch nicht -- er ist '
+                'aelter als diese Fassung. Im Schritt "Vermittler" neu '
+                'hochladen, danach geht es.')
+        else:
+            gross = _naechste_groesse(n, s, deckel)
+            n2, s2, kode2 = verbindung.herunter(geheimnis, gross)
+            if kode2 == 200 and n2 and s2 > 0:
+                e['herunter_bps'] = n2 / s2
+                e['herunter_bytes'] = n2
+                e['herunter_s'] = s2
+
+            # ---- 4. Hinauf
+            sag('Hochladen messen ...')
+            n3, s3, kode3 = verbindung.hinauf(geheimnis, 256 * 1024)
+            if kode3 == 200 and n3 and s3 > 0:
+                gross = _naechste_groesse(n3, s3, deckel)
+                n4, s4, kode4 = verbindung.hinauf(geheimnis, gross)
+                if kode4 == 200 and n4 and s4 > 0:
+                    e['hinauf_bps'] = n4 / s4
+                    e['hinauf_bytes'] = n4
+                    e['hinauf_s'] = s4
+                    if n4 < gross:
+                        # post_max_size schneidet still ab. Ohne diesen Satz
+                        # sieht das nach einer langsamen Leitung aus.
+                        e['hinweise'].append(
+                            'Der Vermittler hat nur %d von %d gesendeten '
+                            'Bytes angenommen. Der Hoster begrenzt die '
+                            'Rumpfgroesse (post_max_size) -- grosse Dateien '
+                            'muss AHPT dort feiner stueckeln.' % (n4, gross))
+    except (OSError, http.client.HTTPException) as ex:
+        e['hinweise'].append(
+            'Die Messung brach ab: %s. Was oben steht, ist das, was bis '
+            'dahin zustande kam.' % ex)
+    finally:
+        if verbindung:
+            verbindung.zu()
+
+    e['gesamt_s'] = time.perf_counter() - gestartet
+
+    # ---- 5. Urteil
+    langsam_satz, best = _vergleich_mit_frueher(basis, e.get('herunter_bps'))
+    e['frueher_bester_bps'] = best
+    schreibt = not (selbsttest and not selbsttest.get('ablage_schreib', True))
+    if not schreibt:
+        e['verdikt'] = 'krank'
+    elif langsam_satz:
+        e['verdikt'] = 'gedrosselt'
+        e['saetze'].append(langsam_satz)
+    elif e.get('herunter_bps') and e['herunter_bps'] < 200 * 1024:
+        e['verdikt'] = 'lahm'
+        e['saetze'].append(
+            'Mit %s ist AHPT zwar benutzbar, aber langsam: Fuer 10 MB gehen '
+            'rund %.0f Sekunden drauf -- und das zweimal, weil jede Datei '
+            'erst hinauf und dann herunter muss.'
+            % (_tempo(e['herunter_bps']), 10 * 1048576 / e['herunter_bps']))
+    elif e['umlauf_ms'] > 1500:
+        e['verdikt'] = 'lahm'
+        e['saetze'].append(
+            'Die Leitung ist in Ordnung, aber der Vermittler selbst braucht '
+            '%.0f ms je Anfrage. Der Agent fragt mehrmals je Sekunde nach -- '
+            'AHPT fuehlt sich dadurch traege an, auch wenn Bandbreite genug '
+            'da ist.' % e['umlauf_ms'])
+    elif not e.get('herunter_bps') and not e.get('hinauf_bps'):
+        # "Gut" waere hier gelogen: Erreichbar ist er, aber ueber sein
+        # Tempo ist nichts bekannt -- und daneben stuenden leere Felder.
+        # Eine Oberflaeche, die "in Ordnung" meldet und nichts anzeigt,
+        # laesst den Nutzer glauben, das Werkzeug sei kaputt.
+        e['verdikt'] = 'teilweise'
+    else:
+        e['verdikt'] = 'gut'
+
+    if (e.get('php_ms') or 0) > 400 and e['php_ms'] > e['tcp_ms'] * 5:
+        e['saetze'].append(
+            'Vom Umlauf entfallen nur %.0f ms auf den Netzweg und %.0f ms '
+            'auf den Webspace. Die Leitung ist also nicht das Problem, der '
+            'Hoster ist es.' % (e['tcp_ms'], e['php_ms']))
+
+    if e['umlauf_streuung_ms'] > 800:
+        e['saetze'].append(
+            'Die Antwortzeiten schwanken stark (%.0f bis %.0f ms). Das ist '
+            'typisch fuer einen ueberbuchten Webspace: mal geht es sofort, '
+            'mal wartet man.'
+            % (e['umlauf_ms'], e['umlauf_ms'] + e['umlauf_streuung_ms']))
+
+    if e.get('herunter_bps') or e.get('hinauf_bps'):
+        _messung_merken({k: e.get(k) for k in
+                         ('adresse', 'zeit', 'tcp_ms', 'umlauf_ms',
+                          'herunter_bps', 'hinauf_bps')})
+    return e
 
 
 def schritt_schluessel(_daten):
@@ -1093,7 +1593,9 @@ def kopplungsdaten():
         'b': _adresse_normalisieren(basis),
         'a': agent,
         't': _token,
-        'h': ['%s:%d' % (a, _port) for a in eigene_adressen()],
+        'h': ['%s:%d' % (a, _port)
+              for a in (['127.0.0.1'] if _nur_localhost
+                        else eigene_adressen())],
     }
 
 
@@ -1216,6 +1718,30 @@ def _log_ende(log_datei, zeilen):
 
 # ----------------------------------------------------------- HTTP-Server
 
+# Adressen, die eine Seite mit FREMDEM Ursprung anrufen darf.
+#
+# WOZU
+# ----
+# Das Portal laeuft auf demselben Rechner, aber unter einer anderen Adresse
+# (localhost:8080 statt 192.168.x.x:8771) -- fuer den Browser sind das zwei
+# verschiedene Welten. Ohne diese Freigabe darf das Portal die Anfrage zwar
+# ABSCHICKEN, aber die Antwort nicht LESEN: Es koennte seinen Schluessel
+# melden und wuesste nie, ob es geklappt hat. Das ist schlimmer als gar
+# nichts, denn dann steht der Nutzer vor einer Oberflaeche, die nichts sagt.
+#
+# WAS DAS NICHT AUFMACHT
+# -----------------------
+# Nichts. Der Stern erlaubt das LESEN der Antwort, nicht das Stellen der
+# Anfrage -- die durfte eine fremde Seite auch vorher schon schicken, dagegen
+# hat CORS nie geschuetzt. Die Tuer bleibt das Token: Ohne gibt es 403, und
+# es hat 128 Bit. Was hier dazukommt, ist ausschliesslich die Moeglichkeit,
+# das Ergebnis anzuzeigen.
+#
+# Mit Absicht NUR diese eine Adresse. /api/stand etwa gaebe Pfade und
+# Adressen der Einrichtung an jede beliebige Seite heraus.
+_CORS_OFFEN = ('/api/koppeln',)
+
+
 class Auslieferer(BaseHTTPRequestHandler):
     def _autorisiert(self):
         """Token aus Cookie ODER Query -- und zwar BEIDE pruefen.
@@ -1246,6 +1772,8 @@ class Auslieferer(BaseHTTPRequestHandler):
         self.send_header('Content-Type', typ)
         self.send_header('Content-Length', str(len(koerper)))
         self.send_header('X-Content-Type-Options', 'nosniff')
+        if urllib.parse.urlparse(self.path).path in _CORS_OFFEN:
+            self.send_header('Access-Control-Allow-Origin', '*')
         if cookie:
             self.send_header('Set-Cookie', cookie)
         self.end_headers()
@@ -1346,6 +1874,23 @@ class Auslieferer(BaseHTTPRequestHandler):
                     json.dumps({'fehler': str(e)}))
         return self._antwort(404, 'text/plain; charset=utf-8', 'nicht da')
 
+    def do_OPTIONS(self):
+        """Die Vorabfrage des Browsers vor einem fremden POST.
+
+        Ohne Token-Pruefung, und das ist richtig so: Der Browser schickt bei
+        der Vorabfrage grundsaetzlich keine Anmeldedaten mit. Preisgegeben
+        wird dabei nichts -- die Antwort nennt nur die erlaubten Verfahren.
+        """
+        pfad = urllib.parse.urlparse(self.path).path
+        if pfad not in _CORS_OFFEN:
+            return self._antwort(404, 'text/plain; charset=utf-8', 'nicht da')
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Max-Age', '600')
+        self.end_headers()
+
     def do_POST(self):
         if not self._autorisiert():
             return self._antwort(403, 'text/plain; charset=utf-8', 'nein')
@@ -1439,12 +1984,19 @@ p  { margin: 0 0 14px }
 .leise { color: var(--leise) }
 label { display: block; margin: 16px 0 6px; font-size: 13px;
         color: var(--leise) }
-input[type=text], input[type=password] {
+input[type=text], input[type=password], textarea {
   width: 100%; padding: 10px 12px; border-radius: 8px;
   border: 1px solid var(--rand); background: #0b0d11; color: var(--text);
   font-size: 14px; font-family: inherit;
 }
-input:focus { outline: 2px solid var(--akzent); outline-offset: -1px }
+/* Bis zum 08.09.2026 stand hier nur `input`. Es gab aber auch keine
+   textarea auf dieser Seite -- die erste war der Kopplungstext, und die
+   stand dann als Briefmarke in der Ecke, weil sie nichts von alledem hier
+   abbekam. Ein Feld, das man nicht lesen kann, kopiert auch niemand. */
+textarea { display: block; resize: vertical; font-family: ui-monospace,
+           SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+input:focus, textarea:focus {
+  outline: 2px solid var(--akzent); outline-offset: -1px }
 .fussleiste { display: flex; justify-content: space-between; gap: 12px;
               margin-top: 20px }
 button { padding: 10px 18px; border-radius: 8px; border: 1px solid var(--rand);
@@ -2198,12 +2750,31 @@ function zeigeGeraetHinzufuegen() {
       + 'Kein WLAN zur Hand? Handy per USB anschlie&szlig;en und dort '
       + 'USB-Tethering einschalten &ndash; die Adressen im Code decken beides ab.')
 
-    + '<h3 style="margin-top:22px">Das Portal: Schl&uuml;ssel eintragen</h3>'
-    + '<p>Das Portal l&auml;uft im Browser und liest keine QR-Codes. Daf&uuml;r '
-    + 'braucht es auch keine Kamera: Die Verbindungsdatei bekommst du im '
-    + 'Schritt &bdquo;Portal&ldquo;, und den Schl&uuml;ssel, den das Portal '
-    + 'beim ersten &Ouml;ffnen erzeugt, tr&auml;gst du hier ein. Derselbe Weg '
-    + 'gilt, wenn die Kamera eines Handys nicht mitspielt.</p>'
+    + '<h3 style="margin-top:22px">Das Portal: denselben Code, nur anders '
+    + '&uuml;bergeben</h3>'
+    + '<p>Das Portal meldet sich seit dem 08.09.2026 ebenfalls selbst '
+    + 'zur&uuml;ck &mdash; es braucht denselben Kopplungscode wie die App, '
+    + 'nur nicht unbedingt eine Kamera. Im Portal auf '
+    + '<b>Einrichtung &rarr; Mit dem Assistenten koppeln</b> gehen, dort '
+    + 'entweder den Code abfotografieren (wenn der Browser das kann) oder '
+    + 'den Text hier einf&uuml;gen:</p>'
+    + '<textarea id="fKopplungstext" rows="3" readonly '
+    + 'style="font-size:12px">wird geladen &hellip;</textarea>'
+    + '<div class="leiste" style="margin:6px 0 4px">'
+    + '<button onclick="kopplungstextKopieren()">Text markieren und '
+    + 'kopieren</button></div>'
+    + warum('Warum steht das nicht in der Verbindungsdatei?',
+        'Weil in diesem Text das Zugangs-Token steckt &mdash; und eine '
+      + 'DATEI bleibt liegen. Sie landet im Download-Ordner und ist dort '
+      + 'in einem Monat noch. Dieser Text lebt nur so lange wie der '
+      + 'Assistent. Die Verbindungsdatei aus Schritt &bdquo;Portal&ldquo; '
+      + 'tr&auml;gt deshalb weiterhin nur Adresse und Agent-Schl&uuml;ssel; '
+      + 'sie erspart Tipparbeit, nimmt dir aber das R&uuml;ckmelden nicht ab.')
+
+    + '<h3 style="margin-top:22px">Von Hand: Schl&uuml;ssel eintragen</h3>'
+    + '<p>Geht immer, egal welches Ger&auml;t und welcher Browser. Den Wert, '
+    + 'den das Portal unter &bdquo;&Ouml;ffentlicher Schl&uuml;ssel dieses '
+    + 'Ger&auml;ts&ldquo; zeigt, hier einf&uuml;gen.</p>'
     + '<label>&Ouml;ffentlicher Schl&uuml;ssel des neuen Ger&auml;ts</label>'
     + '<input type="text" id="fNeuesGeraet" placeholder="64 Hexzeichen">'
     + '<div id="geraetErgebnis"></div>',
@@ -2213,6 +2784,45 @@ function zeigeGeraetHinzufuegen() {
   ));
   wartAufGeraet();
   zeigeFirewallLage();
+  kopplungstextFuellen();
+}
+
+/* Der Kopplungscode als Text -- fuer alle, die keine Kamera auf ihn richten
+   koennen oder wollen.
+
+   Derselbe Inhalt wie im QR-Code, nur anders verpackt. Sitzt das Portal auf
+   DEMSELBEN Rechner wie diese Seite, ist Kopieren ohnehin der kuerzere Weg
+   als eine Kamera auf den eigenen Bildschirm zu halten. */
+async function kopplungstextFuellen() {
+  const f = $('#fKopplungstext');
+  if (!f) return;
+  try {
+    f.value = JSON.stringify(await jsonAn('/api/kopplung'));
+  } catch (e) {
+    f.value = '';
+    f.placeholder = 'Kopplungscode nicht verfuegbar: ' + e.message;
+  }
+}
+
+function kopplungstextKopieren() {
+  const f = $('#fKopplungstext');
+  f.removeAttribute('readonly');
+  f.select();
+  f.setSelectionRange(0, 99999);          // Handy-Browser brauchen das
+  // navigator.clipboard gibt es hier NICHT: Der Assistent laeuft ueber
+  // gewoehnliches http, und Browser geben die Zwischenablage nur im
+  // sicheren Zusammenhang frei. execCommand ist veraltet, aber es ist das
+  // einzige, was hier noch funktioniert -- und wenn auch das scheitert, ist
+  // der Text wenigstens markiert und Strg-C tut den Rest.
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  f.setAttribute('readonly', 'readonly');
+  const ort = $('#geraetErgebnis');
+  if (ort) ort.innerHTML = meldung(
+    ok ? 'Kopiert. Im Portal unter &bdquo;Mit dem Assistenten koppeln&ldquo; '
+       + 'einf&uuml;gen.'
+       : 'Der Text ist markiert &ndash; jetzt Strg-C dr&uuml;cken.',
+    ok ? 'gut' : 'warn');
 }
 
 /* Was die Firewall zu diesem Port sagt.
@@ -2350,7 +2960,7 @@ async function tuGeraetHinzufuegen() {
 # --------------------------------------------------------------- main
 
 def main():
-    global _token, _stand, _port
+    global _token, _stand, _port, _nur_localhost
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=None,
                     help='Vorgabe 8771. Ohne Angabe weicht der Assistent aus, '
@@ -2393,6 +3003,7 @@ def main():
     _port = a.port
     _stand = stand_lesen()
 
+    _nur_localhost = a.nur_localhost
     binden = '127.0.0.1' if a.nur_localhost else '0.0.0.0'
     try:
         server = LauschEndpunkt((binden, a.port), Auslieferer)
