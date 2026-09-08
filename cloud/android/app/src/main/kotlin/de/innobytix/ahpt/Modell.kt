@@ -79,6 +79,18 @@ data class Transfer(
      * Blockwechsel zurueck. Mit ihm gehen beide zusammen.
      */
     val basis: Long = 0,
+    /**
+     * Der Anwender hat "Abbrechen" gedrueckt, der Kern hat es noch nicht
+     * bemerkt.
+     *
+     * Ohne dieses Merkmal war der Knopf stumm: `brichAb()` setzte die Phase
+     * auf "Wird abgebrochen ...", und die naechste Stueckmeldung
+     * ueberschrieb sie Sekundenbruchteile spaeter wieder mit "Stueck 93 von
+     * 152". Auf dem Geraet blitzte der Satz hoechstens auf. Wer nicht
+     * sieht, dass sein Druck ankam, drueckt wieder -- am 08.09.2026 genau
+     * so beobachtet.
+     */
+    val abbruch: Boolean = false,
 ) {
     val anteil: Float? get() = if (gesamt > 0) (getan.toFloat() / gesamt) else null
 
@@ -225,7 +237,8 @@ class Modell(app: Application) : AndroidViewModel(app) {
     fun brichAb() {
         abbruchGewuenscht = true
         _zustand.update {
-            it.copy(transfer = it.transfer?.copy(phase = "Wird abgebrochen ..."))
+            it.copy(transfer = it.transfer?.copy(
+                phase = "Wird abgebrochen ...", abbruch = true))
         }
     }
 
@@ -281,10 +294,17 @@ class Modell(app: Application) : AndroidViewModel(app) {
                         jetzt = nun)
                 }
             }
+            // Steht ein Abbruch aus, gehoert der Phase nur noch EIN Satz.
+            // Der Fortschritt laeuft darunter weiter -- bis zum naechsten
+            // Stueck kommen noch Bytes an, und die zu verschweigen waere
+            // gelogen -- aber die Zeile sagt jetzt, was gilt.
+            val gehalten = if (t.abbruch)
+                neu.copy(phase = "Wird abgebrochen ...") else neu
             // Der Messpunkt fuer die Restzeit wird beim ERSTEN echten
             // Fortschritt gesetzt -- siehe Transfer.restSekunden.
-            val gesetzt = if (neu.gemessenAb == 0L && neu.getan > 0)
-                neu.copy(gemessenAb = nun, gemessenAbBytes = neu.getan) else neu
+            val gesetzt = if (gehalten.gemessenAb == 0L && gehalten.getan > 0)
+                gehalten.copy(gemessenAb = nun, gemessenAbBytes = gehalten.getan)
+                else gehalten
             z.copy(fortschritt = f, transfer = gesetzt)
         }
     }

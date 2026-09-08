@@ -206,7 +206,9 @@ class AhptClient(
         daten: JSONObject,
         melde: FortschrittMelder? = null,
         zeiten: Zeiten? = null,
+        abbruch: Abbruch? = null,
     ): JSONObject {
+        abbruch.pruefe()
         val begonnen = jetzt()
         val sitzung = HandshakeIK(Suite.ChaChaPoly, AHPT_PROLOG, privat, agent)
         val klartext = JSONObject()
@@ -217,7 +219,7 @@ class AhptClient(
         val chiffre = b64(sitzung.schreibeNachricht1(klartext))
 
         val marke = if (chiffre.length > MAX_FRAGE) {
-            hochladen(chiffre, melde)
+            hochladen(chiffre, melde, abbruch)
         } else {
             sende("frage", JSONObject()
                 .put("v", AHPT_VERSION)
@@ -228,8 +230,8 @@ class AhptClient(
         if (marke.length != 32) throw AhptFehler("Vermittler gab keine gueltige Marke")
 
         zeiten?.frageMs = jetzt() - begonnen
-        val umschlag = warte(marke, melde, zeiten)
-        val ergebnis = auspacken(marke, umschlag, sitzung, melde)
+        val umschlag = warte(marke, melde, zeiten, abbruch)
+        val ergebnis = auspacken(marke, umschlag, sitzung, melde, abbruch)
         if (zeiten != null) {
             zeiten.holenMs = jetzt() - zeiten.bereit
             zeiten.gesamtMs = jetzt() - begonnen
@@ -248,7 +250,11 @@ class AhptClient(
      * Sichtbar wird die Marke erst, wenn alle Stuecke liegen -- sonst holte
      * der Agent eine halbe Frage.
      */
-    private fun hochladen(chiffre: String, melde: FortschrittMelder?): String {
+    private fun hochladen(
+        chiffre: String,
+        melde: FortschrittMelder?,
+        abbruch: Abbruch? = null,
+    ): String {
         // Mindestens 2 Stuecke -- nicht nur "mind. 1". Der Vermittler nimmt
         // die leere Ankuendigungs-Nutzlast nur bei `teile > 1` an; bei genau
         // einem Stueck landet sie in der normalen Pruefung und scheitert
@@ -276,6 +282,10 @@ class AhptClient(
             .optString("marke")
 
         for (i in 0 until teile) {
+            // Hier auszusteigen kostet nichts: Die Marke wird erst durch
+            // `frage_fertig` sichtbar. Was liegen bleibt, sieht der Agent
+            // also nie, und der Vermittler raeumt es nach MARKE_TTL weg.
+            abbruch.pruefe()
             val von = i * stueckgroesse
             val bis = minOf(chiffre.length, von + stueckgroesse)
             sende("frage_stueck", JSONObject()
@@ -311,12 +321,20 @@ class AhptClient(
         marke: String,
         melde: FortschrittMelder?,
         zeiten: Zeiten? = null,
+        abbruch: Abbruch? = null,
     ): JSONObject {
         val bis = jetzt() + fristMs
         val begonnen = jetzt()
         var abstand = 350L
         var abrufe = 0
         while (jetzt() < bis) {
+            // Die WICHTIGSTE der drei Stellen: Hier steht der Anwender vor
+            // "Warte auf den Agenten ...", und hier drueckt er ab. Die Frage
+            // liegt dann schon beim Vermittler -- der Agent arbeitet sie zu
+            // Ende und legt eine Antwort hin, die niemand abholt. Sie
+            // verfaellt nach ANTWORT_TTL. Das ist der Preis, und er ist
+            // kleiner als eine Minute Warten auf einen Abbruch.
+            abbruch.pruefe()
             val q = holeJson("warteschlange.json")
             abrufe++
             val fertig = q?.optJSONArray("fertig")
@@ -369,6 +387,7 @@ class AhptClient(
         u: JSONObject,
         sitzung: HandshakeIK,
         melde: FortschrittMelder? = null,
+        abbruch: Abbruch? = null,
     ): JSONObject {
         pruefeUmschlag(u, marke)
         val krypto = u.optString("krypto")
@@ -387,7 +406,8 @@ class AhptClient(
         val teile = u.optInt("teile", 1)
         val chiffre = if (teile > 1) {
             stuecke(marke, teile,
-                    u.optJSONObject("nutzlast")?.optJSONArray("stuecke"), melde)
+                    u.optJSONObject("nutzlast")?.optJSONArray("stuecke"), melde,
+                    abbruch)
         } else {
             u.optJSONObject("nutzlast")?.optString("chiffre") ?: ""
         }
@@ -410,6 +430,7 @@ class AhptClient(
         teile: Int,
         liste: JSONArray?,
         melde: FortschrittMelder? = null,
+        abbruch: Abbruch? = null,
     ): String {
         if (liste == null || liste.length() != teile) {
             throw AhptFehler("Verzeichnis und Stueckzahl passen nicht zusammen")
@@ -433,6 +454,11 @@ class AhptClient(
             // nichts meldet, laesst den Bildschirm die ganze Zeit "0 B"
             // zeigen -- und das sieht aus wie haengengeblieben.
             melde?.invoke(Fortschritt.Stueck(i + 1, teile, hinauf = false))
+            // Und hier auch, aus demselben Grund wie oben: Ein Block von
+            // 4 MiB sind rund neunzig Abrufe. Erst am Blockende zu fragen
+            // hiesse, dass "Abbrechen" bis zu einer Minute lang nichts tut
+            // -- und was nichts tut, drueckt der Anwender wieder und wieder.
+            abbruch.pruefe()
             val s = holeJson(datei) ?: throw AhptFehler("Stueck $nr fehlt")
             pruefeUmschlag(s, marke, nr)
             if (s.optInt("teile", -1) != teile) throw AhptFehler("Stueck $nr zaehlt anders")
@@ -471,5 +497,50 @@ class AhptClient(
         } catch (e: Exception) {
             throw AhptFehler("Abruf lieferte kein JSON: $pfad", Fehlerart.Netz)
         }
+    }
+}
+
+
+/* ------------------------------------------------------------- Abbruch */
+
+/**
+ * Ein Vorgang, den der Anwender abbrechen kann.
+ *
+ * WARUM EIN RUECKRUF UND NICHT DIE KOROUTINE
+ * -------------------------------------------
+ * Dieser Kern ist bewusst frei von Android und von Koroutinen -- er laeuft
+ * genauso in einem gewoehnlichen JVM-Test. Ein `job.cancel()` haette hier
+ * ohnehin nichts ausgerichtet: Die Uebertragung steckt in blockierenden
+ * Lesevorgaengen, und Koroutinen brechen nur an Aussetzpunkten ab.
+ *
+ * WO GEFRAGT WIRD, UND WARUM UEBERALL
+ * ------------------------------------
+ * Zuerst nur zwischen den Bloecken -- das war zu selten. Ein Block sind
+ * 4 MiB, und am 08.09.2026 sah das auf dem Geraet so aus: Druecken bei
+ * 2,4 MB, und bis genau 4,0 MB geschah nichts. Der Anwender drueckt dann
+ * wieder, und wieder, denn ein Knopf ohne Wirkung ist ein kaputter Knopf.
+ *
+ * Gefragt wird deshalb an vier Stellen. Alle vier hinterlassen nichts
+ * Halbes -- nur etwas Liegengebliebenes, das von selbst verfaellt:
+ *
+ * | Stelle                    | was liegen bleibt         | verfaellt nach |
+ * |---------------------------|---------------------------|----------------|
+ * | zwischen den Bloecken     | nichts                    | --             |
+ * | Frage hinauf, je Stueck   | unsichtbare Teilfrage     | MARKE_TTL      |
+ * | Warten auf den Agenten    | Antwort ohne Abholer      | ANTWORT_TTL    |
+ * | Antwort herunter, je St.  | der Rest der Antwort      | ANTWORT_TTL    |
+ *
+ * Genau dieselbe Lage entsteht, wenn die App abstuerzt oder das Netz
+ * wegbricht -- der Vermittler raeumt das ohnehin. Dafuer wirkt "Abbrechen"
+ * jetzt innerhalb eines Stueckes statt innerhalb eines Blocks.
+ */
+fun interface Abbruch {
+    /** true heisst: der Anwender will nicht mehr. */
+    fun gewuenscht(): Boolean
+}
+
+internal fun Abbruch?.pruefe() {
+    if (this != null && gewuenscht()) {
+        throw AhptFehler("Abgebrochen.", Fehlerart.Abgebrochen)
     }
 }

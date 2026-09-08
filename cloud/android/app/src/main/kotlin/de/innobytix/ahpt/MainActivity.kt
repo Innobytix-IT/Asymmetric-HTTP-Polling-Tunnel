@@ -625,6 +625,11 @@ private fun UebertragungsDialog(t: Transfer, aufAbbruch: () -> Unit) {
                     )
                     Text(
                         when {
+                            // Nach dem Druck auf Abbrechen sagt eine
+                            // Restzeit nichts mehr: Sie rechnet das Ende
+                            // einer Uebertragung aus, die gar nicht mehr
+                            // ans Ende kommen soll.
+                            t.abbruch -> ""
                             rest != null -> "noch ${lesbareDauer(rest)}"
                             // Solange nichts Belastbares da ist, wird auch
                             // nichts behauptet. Eine Schaetzung, die von 40
@@ -639,7 +644,13 @@ private fun UebertragungsDialog(t: Transfer, aufAbbruch: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = aufAbbruch) { Text("Abbrechen") }
+            // Nach dem ersten Druck ist der Wunsch gesetzt; jeder weitere
+            // liefe ins Leere. Ein Knopf, der noch drueckbar aussieht, aber
+            // nichts mehr bewirkt, ist genau der Knopf, den man wieder und
+            // wieder drueckt -- deshalb wird er hier still.
+            TextButton(onClick = aufAbbruch, enabled = !t.abbruch) {
+                Text(if (t.abbruch) "Wird beendet" else "Abbrechen")
+            }
         },
     )
 }

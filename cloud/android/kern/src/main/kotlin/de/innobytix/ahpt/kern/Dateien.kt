@@ -66,7 +66,7 @@ fun AhptClient.hole(
             .put("pfad", pfad)
             .put("von", 0)
             .put("laenge", BLOCK)
-            .put("pruefsumme", true), melde),
+            .put("pruefsumme", true), melde, abbruch = abbruch),
         "nichts gefunden",
     )
     val gesamt = erst.optLong("gesamt")
@@ -93,7 +93,7 @@ fun AhptClient.hole(
         val w = inhaltOderFehler(
             frage("dateien", "hole", JSONObject()
                 .put("pfad", pfad).put("von", von).put("laenge", laenge),
-                melde),
+                melde, abbruch = abbruch),
             "nichts gefunden",
         )
         // Der Zeitstempel muss ueber alle Umlaeufe gleich bleiben. Aendert
@@ -150,7 +150,7 @@ fun AhptClient.lege(
             frage("dateien", "lege", JSONObject()
                 .put("pfad", pfad)
                 .put("inhalt_typ", "base64")
-                .put("inhalt", b64(bytes)), melde),
+                .put("inhalt", b64(bytes)), melde, abbruch = abbruch),
             "nicht abgelegt",
         )
     }
@@ -198,7 +198,8 @@ fun AhptClient.lege(
             // Auch hier `melde`: Ein Block von 8 MB braucht seine Zeit,
             // und waehrenddessen soll der Bildschirm nicht schweigen.
             antwort = inhaltOderFehler(
-                frage("dateien", "lege_block", daten, melde), "block abgewiesen",
+                frage("dateien", "lege_block", daten, melde,
+                      abbruch = abbruch), "block abgewiesen",
             )
             melde?.invoke(Fortschritt.Hoch(i + 1, bloecke))
         }
@@ -245,31 +246,4 @@ private fun InputStream.lies(laenge: Int): ByteArray {
         gefuellt += n
     }
     return b
-}
-
-
-/* ------------------------------------------------------------- Abbruch */
-
-/**
- * Ein Vorgang, den der Anwender abbrechen kann.
- *
- * WARUM EIN RUECKRUF UND NICHT DIE KOROUTINE
- * -------------------------------------------
- * Dieser Kern ist bewusst frei von Android und von Koroutinen -- er laeuft
- * genauso in einem gewoehnlichen JVM-Test. Ein `job.cancel()` haette hier
- * ohnehin nichts ausgerichtet: Die Uebertragung steckt in blockierenden
- * Lesevorgaengen, und Koroutinen brechen nur an Aussetzpunkten ab. Ein
- * Rueckruf, der ZWISCHEN den Bloecken gefragt wird, wirkt dagegen sicher --
- * und zwar an genau den Stellen, an denen ein Abbruch nichts Halbes
- * hinterlaesst.
- */
-fun interface Abbruch {
-    /** true heisst: der Anwender will nicht mehr. */
-    fun gewuenscht(): Boolean
-}
-
-internal fun Abbruch?.pruefe() {
-    if (this != null && gewuenscht()) {
-        throw AhptFehler("Abgebrochen.", Fehlerart.Abgebrochen)
-    }
 }
