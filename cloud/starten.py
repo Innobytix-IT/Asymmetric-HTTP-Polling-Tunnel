@@ -272,7 +272,7 @@ def main():
         w = tk.Toplevel(fenster)
         w.title('Vermittler pruefen')
         w.configure(bg=GRUND)
-        w.minsize(620, 520)
+        w.minsize(620, 600)
         r = tk.Frame(w, bg=GRUND, padx=24, pady=20)
         r.pack(fill='both', expand=True)
 
@@ -297,6 +297,45 @@ def main():
         tk.Label(r, text='Vorbelegt ist der eingerichtete. Zum Vergleichen '
                          'eine andere Adresse eintragen -- etwa einen zweiten '
                          'Webspace, auf dem derselbe Vermittler liegt.',
+                 bg=GRUND, fg=LEISE, font=SCHRIFT, anchor='w', justify='left',
+                 wraplength=560).pack(fill='x', pady=(0, 12))
+
+        # ---- Die eigene Leitung als Vergleichsgroesse
+        #
+        # OHNE SIE SAGT DIE MESSUNG NUR DIE HAELFTE. Sie misst, wie lange
+        # der Vermittler braucht -- nicht, WORAN es liegt. Ein Anschluss mit
+        # 20 Mbit/s hinauf kann nicht mehr hergeben, und dann ist ein
+        # langsamer Rundlauf kein Mangel des Webspace, sondern die Wahrheit
+        # ueber die eigene Leitung. Beides sieht gleich aus.
+        #
+        # Es steht hier als FELD und nicht als Messung: Nachmessen hiesse,
+        # einen Dritten anzurufen -- der erfuehre die eigene IP, und es
+        # kostete je Durchgang zweistellige Megabyte. Fuer die Frage "meine
+        # Leitung oder der Hoster?" genuegt die Vertragsrate: Ob 2 von 20
+        # ankommen oder 18 von 20, unterscheidet man auch so.
+        leitung = einrichten.leitung_lesen()
+        tk.Label(r, text='Deine Leitung laut Vertrag (Mbit/s)', bg=GRUND,
+                 fg=TEXT, font=SCHRIFT, anchor='w').pack(fill='x')
+        lz = tk.Frame(r, bg=GRUND)
+        lz.pack(fill='x', pady=(4, 2))
+
+        def zahlfeld(beschriftung, wert):
+            tk.Label(lz, text=beschriftung, bg=GRUND, fg=LEISE,
+                     font=SCHRIFT).pack(side='left')
+            f = tk.Entry(lz, bg=FLAECHE, fg=TEXT, font=SCHRIFT, relief='flat',
+                         width=7, insertbackground=AKZENT,
+                         highlightthickness=1, highlightbackground=FLAECHE,
+                         highlightcolor=AKZENT)
+            f.pack(side='left', padx=(6, 18), ipady=4)
+            if wert:
+                f.insert(0, ('%g' % wert))
+            return f
+
+        feld_runter = zahlfeld('herunter', leitung.get('herunter_mbit'))
+        feld_hoch = zahlfeld('hinauf', leitung.get('hinauf_mbit'))
+        tk.Label(r, text='Freilassen, wenn du sie nicht weisst -- dann '
+                         'fehlt nur der Satz, ob der Vermittler oder deine '
+                         'Leitung bremst.',
                  bg=GRUND, fg=LEISE, font=SCHRIFT, anchor='w', justify='left',
                  wraplength=560).pack(fill='x', pady=(0, 12))
 
@@ -468,6 +507,10 @@ def main():
                       'tut. Auf einer langsamen Leitung dauert das eine '
                       'Weile.', 'gut')])
             adresse = feld.get().strip()
+            # Vor dem Lauf sichern, nicht danach: vermittler_messen() liest
+            # die Datei, nicht diese Felder.
+            einrichten.leitung_schreiben(feld_hoch.get().strip().replace(',', '.'),
+                                         feld_runter.get().strip().replace(',', '.'))
 
             def lauf():
                 try:

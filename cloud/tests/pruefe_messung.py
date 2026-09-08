@@ -162,24 +162,48 @@ def main():
         pruefe(len(verlauf) >= 5,
                '%d Fortschrittsmeldungen' % len(verlauf))
 
-        print('== 5. Das Messfenster wird wieder geschlossen')
+        print('== 5. Die eigene Leitung als Vergleichsgroesse')
+        # Dieselbe Messung, zwei Vertragsraten -- und zwei verschiedene
+        # Befunde. Genau das ist der Zweck: Ein Vermittler, der die Leitung
+        # ausschoepft, ist nicht lahm, sondern fertig.
+        einrichten.LEITUNG_DATEI = os.path.join(heim, 'leitung.json')
+        rate = (e.get('ablegen_bps') or 0) * 8 / 1e6
+        einrichten.leitung_schreiben(round(rate * 1.1, 2), 1000)   # knapp drueber
+        e_eng = einrichten.vermittler_messen(basis, groesse=256 * 1024)
+        pruefe(e_eng.get('anteil_hinauf', 0) and e_eng['anteil_hinauf'] > 0.6,
+               'knappe Leitung -> hoher Anteil (%.0f %%)'
+               % ((e_eng.get('anteil_hinauf') or 0) * 100))
+        pruefe(any('Am Vermittler liegt es jedenfalls nicht' in x
+                   for x in e_eng['saetze']),
+               'und der Satz sagt: nicht der Vermittler')
+
+        einrichten.leitung_schreiben(rate * 20, 1000)              # weit drueber
+        e_weit = einrichten.vermittler_messen(basis, groesse=256 * 1024)
+        pruefe((e_weit.get('anteil_hinauf') or 1) < 0.25,
+               'weite Leitung -> niedriger Anteil (%.0f %%)'
+               % ((e_weit.get('anteil_hinauf') or 0) * 100))
+        pruefe(any('NICHT dein' in x for x in e_weit['saetze']),
+               'und der Satz sagt: nicht dein Anschluss')
+        einrichten.leitung_schreiben(None, None)
+
+        print('== 6. Das Messfenster wird wieder geschlossen')
         # Bleibt es stehen, zaehlt der Agent dauerhaft keine abgewiesenen
         # Fragen mehr -- und genau darauf soll man sich verlassen koennen.
         pruefe(not os.path.exists(einrichten.MESS_FENSTER),
                'messung_laeuft ist weg')
 
-        print('== 6. Die Warteschlange bleibt aufgeraeumt')
+        print('== 7. Die Warteschlange bleibt aufgeraeumt')
         st = einrichten._relay_selbsttest(basis)
         pruefe(st is not None and st.get('offen') == 0,
                'keine offene Marke zurueckgelassen (offen=%s)'
                % (st or {}).get('offen'))
 
-        print('== 7. Der Verlauf wurde fortgeschrieben')
+        print('== 8. Der Verlauf wurde fortgeschrieben')
         v = einrichten._messungen_lesen()
-        pruefe(len(v) == 1 and v[0].get('arbeit_s'),
-               '%d Eintrag im Verlauf' % len(v))
+        pruefe(len(v) == 3 and all(x.get('arbeit_s') for x in v),
+               '%d Eintraege im Verlauf' % len(v))
 
-        print('== 8. Ist er weg, sagt die Messung das -- und raet nicht')
+        print('== 9. Ist er weg, sagt die Messung das -- und raet nicht')
         php.send_signal(signal.SIGTERM)
         php.wait(timeout=10)
         php = None

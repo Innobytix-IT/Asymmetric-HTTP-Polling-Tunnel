@@ -714,6 +714,73 @@ def _geheimnis_lesen():
     return wert
 
 
+# ------------------------------------------------------- Die eigene Leitung
+#
+# WOZU EINE ZAHL, DIE DER NUTZER SELBST EINTRAEGT
+# ------------------------------------------------
+# Der Rundlauf sagt, wie lange der Vermittler braucht. Er sagt NICHT, woran
+# es liegt: Ein DSL-Anschluss mit 20 Mbit/s hinauf kann gar nicht mehr
+# hergeben, und dann ist ein langsamer Rundlauf kein Mangel des Webspace,
+# sondern die Wahrheit ueber die eigene Leitung. Ohne Vergleichsgroesse
+# sind beide Faelle nicht zu unterscheiden -- und der Nutzer sucht dann
+# beim Falschen.
+#
+# WARUM NICHT EINFACH MESSEN
+# ---------------------------
+# Weil dafuer ein DRITTER noetig waere. Dieses Werkzeug redet mit genau
+# zwei Stellen: dem eigenen Webspace und localhost. Ein Speedtest gegen
+# einen fremden Knoten waere ein Bruch damit -- er erfuehre die IP des
+# Nutzers und dass hier gemessen wird -- und er kostete je Durchgang
+# zweistellige Megabyte, am Handy-Tethering also Geld.
+#
+# Fuer die Frage "meine Leitung oder der Hoster?" genuegt die VERTRAGSRATE.
+# Ob der Vermittler 2 von 20 Mbit/s schafft oder 18 von 20, unterscheidet
+# man auch ohne Messung. Die genauere Zahl waere den Preis nicht wert.
+#
+# Am 08.09.2026 gemeinsam so entschieden.
+
+LEITUNG_DATEI = os.path.join(KONFIG_ORDNER, 'leitung.json')
+
+
+def leitung_lesen():
+    """Zurueck: {'hinauf_mbit': x, 'herunter_mbit': y} oder {}."""
+    try:
+        with open(LEITUNG_DATEI, encoding='utf-8') as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def leitung_schreiben(hinauf_mbit, herunter_mbit):
+    """Speichert die Vertragsrate. 0 oder None heisst: nicht angegeben."""
+    d = {}
+    for name, wert in (('hinauf_mbit', hinauf_mbit),
+                       ('herunter_mbit', herunter_mbit)):
+        try:
+            f = float(wert)
+        except (TypeError, ValueError):
+            continue
+        if 0 < f <= 100000:
+            d[name] = f
+    try:
+        os.makedirs(KONFIG_ORDNER, exist_ok=True)
+        tmp = LEITUNG_DATEI + '.neu'
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            json.dump(d, fh, indent=1)
+        os.replace(tmp, LEITUNG_DATEI)
+    except OSError:
+        pass
+    return d
+
+
+def _ausschoepfung(erreicht_bps, leitung_mbit):
+    """Wieviel von der Leitung kommt an? Zurueck: Anteil oder None."""
+    if not erreicht_bps or not leitung_mbit:
+        return None
+    return (erreicht_bps * 8 / 1e6) / float(leitung_mbit)
+
+
 def _agent_takt():
     """poll_abstand aus der Agent-Konfiguration, sonst die Vorgabe."""
     pfad = os.path.join(KONFIG_ORDNER, 'agent_privat.toml')
@@ -993,6 +1060,13 @@ def _rundlauf(basis, geheimnis, groesse, sag):
     e['arbeit_s'] = sum(e.get(k, 0.0) for k in
                         ('frage_s', 'aufnehmen_s', 'ablegen_s',
                          'fertigmelden_s', 'abholen_s'))
+    # Je Richtung eine Rate. Erst damit laesst sich die Leitung des Nutzers
+    # dagegenhalten -- eine Gesamtzeit taugt dafuer nicht, weil hinauf und
+    # herunter verschiedene Grenzen haben (bei DSL sehr verschiedene).
+    if e.get('ablegen_s'):
+        e['ablegen_bps'] = e['leitung_bytes'] / e['ablegen_s']
+    if e.get('abholen_s'):
+        e['abholen_bps'] = e.get('zurueck_bytes', 0) / e['abholen_s']
     return e
 
 
@@ -1107,11 +1181,55 @@ def vermittler_messen(adresse=None, melde=None, groesse=MESS_DATEI):
         e['durchsatz_bps'] = (e['leitung_bytes'] * 2) / e['arbeit_s']
 
     # ---- 5. Urteil
+    # ---- Wieviel von der eigenen Leitung kommt ueberhaupt an?
+    #
+    # DAS AENDERT DAS URTEIL, und zwar zu Recht: Ein Vermittler, der 18 von
+    # 20 moeglichen Mbit/s ausschoepft, ist NICHT lahm -- da ist einfach
+    # nicht mehr zu holen. Ohne diese Zahl haette er dieselbe Ruege
+    # bekommen wie einer, der 2 von 20 schafft.
+    leitung = leitung_lesen()
+    e['leitung'] = leitung
+    e['anteil_hinauf'] = _ausschoepfung(e.get('ablegen_bps'),
+                                        leitung.get('hinauf_mbit'))
+    e['anteil_herunter'] = _ausschoepfung(e.get('abholen_bps'),
+                                          leitung.get('herunter_mbit'))
+    anteile = [a for a in (e['anteil_hinauf'], e['anteil_herunter'])
+               if a is not None]
+    # Die AUSGELASTETERE Richtung entscheidet: Wenn schon eine von beiden
+    # an ihrer Grenze haengt, ist die Leitung der Engpass.
+    e['anteil'] = max(anteile) if anteile else None
+
+    if e['anteil'] is not None:
+        richtung, anteil, rate, grenze = (
+            ('Ablegen', e['anteil_hinauf'], e.get('ablegen_bps'),
+             leitung.get('hinauf_mbit'))
+            if e['anteil_hinauf'] == e['anteil'] else
+            ('Zurueckholen', e['anteil_herunter'], e.get('abholen_bps'),
+             leitung.get('herunter_mbit')))
+        if anteil >= 0.6:
+            e['saetze'].append(
+                'Beim %s kamen %s von den %.0f Mbit/s an, die deine Leitung '
+                'hergibt -- %.0f %%. Viel mehr ist mit dieser Stueckelung '
+                'nicht zu holen: Jedes der %d Stuecke kostet einen eigenen '
+                'Umlauf. Am Vermittler liegt es jedenfalls nicht.'
+                % (richtung, _tempo(rate, kurz=True), grenze,
+                   anteil * 100, e['stuecke']))
+        elif anteil <= 0.25:
+            e['saetze'].append(
+                'Beim %s kamen nur %s von den %.0f Mbit/s an, die deine '
+                'Leitung hergibt -- %.0f %%. Der Engpass ist also NICHT dein '
+                'Anschluss, sondern der Webspace oder der Weg dorthin.'
+                % (richtung, _tempo(rate, kurz=True), grenze,
+                   anteil * 100))
+
     langsam_satz, best = _vergleich_mit_frueher(basis, e['arbeit_s'])
     e['frueher_beste_arbeit_s'] = best
     if langsam_satz:
         e['verdikt'] = 'gedrosselt'
         e['saetze'].append(langsam_satz)
+    elif e['anteil'] is not None and e['anteil'] >= 0.6:
+        # An der eigenen Grenze angekommen -- das ist kein Mangel.
+        e['verdikt'] = 'gut'
     elif e['arbeit_s'] > 25:
         e['verdikt'] = 'lahm'
         e['saetze'].append(
@@ -1144,7 +1262,8 @@ def vermittler_messen(adresse=None, melde=None, groesse=MESS_DATEI):
 
     _messung_merken({k: e.get(k) for k in
                      ('adresse', 'zeit', 'tcp_ms', 'umlauf_ms', 'arbeit_s',
-                      'rundlauf_s', 'durchsatz_bps', 'datei_bytes')})
+                      'rundlauf_s', 'durchsatz_bps', 'datei_bytes',
+                      'ablegen_bps', 'abholen_bps')})
     return e
 
 
