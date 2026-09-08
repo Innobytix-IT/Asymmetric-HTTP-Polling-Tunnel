@@ -394,6 +394,14 @@ damit ein Testlauf nicht mit Manuels eigenen Geraeten verwechselt wird.
 
 ---
 
+## Was noch offen ist
+
+`OFFEN.md` fuehrt, was bekannt und absichtlich noch nicht erledigt ist --
+mitsamt dem Grund, warum es liegen blieb. Kein Wunschzettel: Dort steht nur,
+was jemand aufgeschrieben hat, weil er es sonst vergisst.
+
+---
+
 ## Was es nicht gibt, und warum
 
 - **Kein Loeschen und kein Ueberschreiben.** Wer ueberschreiben kann, kann
