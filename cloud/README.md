@@ -113,6 +113,7 @@ python3 ahpt_client.py --konfig client.toml liste Belege
 python3 ahpt_client.py --konfig client.toml hole Belege/rechnung.pdf
 python3 ahpt_client.py --konfig client.toml lege ~/scan.pdf --nach Belege/scan.pdf
 python3 ahpt_client.py --konfig client.toml ordner Rechnungen_2026
+python3 ahpt_client.py --konfig client.toml pruefen
 ```
 
 ### Im Browser
@@ -155,6 +156,39 @@ Ausgewiesen werden Rundlauf, Arbeit, Wartezeit und Umlauf getrennt, dazu
 welche **Richtung** bremst. Ein Verlauf in `~/.ahpt/messungen.json` haelt
 die letzten fuenfzig fest: "Gedrosselt" ist an einer einzelnen Zahl gar
 nicht zu erkennen, nur am Vergleich mit vorher.
+
+### Die Verbindung von HIER aus pruefen
+
+Die zwei Messungen oben stehen beide am selben Ende -- auf dem Rechner des
+Agenten. Ehrlich messen sie damit die Strecke Agent <-> Webspace. Die andere
+Haelfte, **Webspace <-> das Geraet in deiner Hand**, koennen sie
+prinzipiell nicht sehen: Dort stehen sie nicht. Und genau die spuerst du,
+wenn du unterwegs im Mobilfunk oder in einem fremden WLAN sitzt.
+
+Deshalb kann jeder Client es selbst -- und zwar besser als jedes Werkzeug
+auf dem Server, weil er beim Agenten ZUGELASSEN ist: Er braucht keinen
+Fuellstoff und keinen Sonderaufruf, sondern stellt eine echte Frage und
+laesst die Uhr mitlaufen.
+
+```
+Kommandozeile   python3 ahpt_client.py --konfig client.toml pruefen
+Portal          Menue -> Verbindung pruefen
+App             Werkzeugleiste -> Verbindung pruefen
+```
+
+```
+Ein vollstaendiger Vorgang ueber den ganzen Weg -- dieser
+Rechner, Vermittler, Agent und zurueck -- hat 1.7 s gebraucht.
+
+   Frage ablegen                29 ms
+   Warten auf den Agenten     1612 ms   (4 Abfragen)
+   Antwort holen                 9 ms
+```
+
+Die mittlere Zeile ist die eigentliche Auskunft: Auf dem Server muss dieser
+Anteil aus dem eingestellten Abfragetakt GESCHAETZT werden -- hier wird er
+gemessen, weil die Uhr am richtigen Ende steht. Gemessen wird die
+Antwortzeit, nicht der Durchsatz; eine Auflistung ist klein.
 
 ### Die eigene Leitung als Vergleich
 
@@ -265,10 +299,31 @@ ist der Grund, warum im Vorgarten nichts Lesbares liegt.
 relay.php, statisch                       14 Pruefungen
 Noise IK in Python                        53 Pruefungen   gegen offizielle Testvektoren
 Noise IK in JavaScript                    13 Pruefungen   gegen dieselben Vektoren
+Noise IK und Protokoll in Kotlin          16 Pruefungen   gegen dieselben Vektoren
 Durchstich mit Client, Portal, Angriffen  34 Pruefungen
 Portal gegen den laufenden Betrieb         6 Pruefungen   ueber bplaced, echtes PHP
 Portal im echten Browser                  gemessen      Auflisten, Hochladen, Rundlauf
+Rundlauf gegen echtes PHP                 27 Pruefungen   php -S, Wegwerf-Vermittler
+Messung neben laufendem Agenten            4 Pruefungen   zwei Prozesse gleichzeitig
 ```
+
+Die letzten beiden brauchen `php` (`php -S`) und melden 77, wenn keines da
+ist -- uebersprungen, nicht bestanden.
+
+**Auch der Rundlauf-Test hat sofort einen Fehler gefunden**, und keinen
+kleinen: Mit dem RICHTIGEN Geheimnis kam ein HTTP 403 zurueck. Die Ursache
+lag nicht in der Messung, sondern in `einrichten.py` -- es schrieb
+`relay_token.php` als `<?php return "<geheimnis>";`, eine Datei ohne
+Zeilenschaltung, aus der `lies_geschuetzt()` in `relay.php` immer eine leere
+Zeichenkette macht. `agent_erlaubt()` war damit dauerhaft falsch: JEDE ueber
+den Assistenten eingerichtete Anlage haette auf jede Frage nie eine Antwort
+bekommen. Nicht betroffen waren die aelteren aus `ausliefern.sh` -- das baut
+die Datei richtig und prueft die Schutzzeile sogar nach. **Genau deshalb
+fiel es so lange nicht auf: Der einzige je erprobte Weg war der richtige.**
+
+Der Test baut die beiden Dateien deshalb mit den ECHTEN Erzeugern aus
+`einrichten.py`, nicht mit einer eigenen Nachbildung. Eine Nachbildung
+haette hier das Richtige getan und den Fehler zugedeckt.
 
 Der letzte Punkt hat einen Fehler gefunden, den keine der anderen Pruefungen
 finden konnte: **Ein 404 vom Hoster kommt ohne CORS-Kopfzeile.** Das Portal

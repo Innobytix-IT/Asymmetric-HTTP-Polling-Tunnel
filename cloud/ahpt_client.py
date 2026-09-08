@@ -256,8 +256,46 @@ class Client:
             'einem spaeteren Zeitpunkt erneut.\n'
             '  (Letzter Grund nach %d Versuchen: %s)' % (n, letzter))
 
-    def _frage_einmal(self, dienst, aktion, daten):
-        """Ein einzelner Versuch: fragen, warten, Antwort auspacken."""
+    def miss_verbindung(self, pfad=''):
+        """Die Verbindung pruefen -- von HIER aus, wo der Client steht.
+
+        WARUM DAS NICHT DER TEST AUF DEM SERVER LEISTEN KANN
+        -----------------------------------------------------
+        Der Vermittlertest in `starten.py` laeuft auf dem Rechner des Agenten
+        und spielt beide Rollen. Ehrlich misst er damit die Strecke Agent <->
+        Webspace. Die andere Haelfte -- Webspace <-> DIESER Rechner -- sieht
+        er prinzipiell nicht, denn dort steht er nicht. Und genau die spuert
+        man, wenn man von unterwegs arbeitet.
+
+        Hier steht der Client. Er ist zugelassen, also stellt er eine ECHTE
+        Frage und laesst die Uhr mitlaufen -- ohne Fuellstoff, ohne
+        Sonderweg, ohne einen Endpunkt, den es sonst nicht gaebe.
+
+        Gemessen wird die ANTWORTZEIT, nicht der Durchsatz: Eine Auflistung
+        ist klein. Wieviel durch die Leitung passt, zeigt das naechste
+        Herunterladen einer richtigen Datei.
+
+        OHNE die Wiederholschleife von `frage()`: Ein zweiter Versuch waere
+        ein zweiter Vorgang, und die Summe zweier Vorgaenge ist keine
+        Antwortzeit.
+        """
+        zeiten = {}
+        t0 = time.perf_counter()
+        antwort = self._frage_einmal('dateien', 'liste', {'pfad': pfad},
+                                     zeiten)
+        zeiten['eintraege'] = len(antwort.get('eintraege') or [])
+        zeiten['gesamt_s'] = time.perf_counter() - t0
+        return zeiten
+
+    def _frage_einmal(self, dienst, aktion, daten, zeiten=None):
+        """Ein einzelner Versuch: fragen, warten, Antwort auspacken.
+
+        `zeiten` ist freiwillig. Wird ein Verzeichnis uebergeben, traegt
+        dieser Vorgang seine Abschnitte darin ein -- ohne dass am Ablauf
+        etwas anders liefe. Genau das macht die Verbindungspruefung
+        glaubwuerdig: Sie misst den ECHTEN Vorgang, sie baut ihn nicht nach.
+        """
+        begonnen = time.perf_counter()
         sitzung = None
         if self.a.verfahren == 'noise_ik':
             import krypto
@@ -292,8 +330,15 @@ class Client:
         if not isinstance(marke, str) or len(marke) != 32:
             raise ClientFehler('Vermittler gab keine gueltige Marke')
 
-        umschlag = self._warte(marke)
-        return self._auspacken(marke, umschlag, sitzung)
+        if zeiten is not None:
+            zeiten['frage_s'] = time.perf_counter() - begonnen
+        umschlag = self._warte(marke, zeiten)
+        ergebnis = self._auspacken(marke, umschlag, sitzung)
+        if zeiten is not None:
+            zeiten['holen_s'] = (time.perf_counter()
+                                 - zeiten.pop('_bereit', time.perf_counter()))
+            zeiten['gesamt_s'] = time.perf_counter() - begonnen
+        return ergebnis
 
     def _hochladen(self, chiffre, fortschritt=None):
         """Eine grosse Frage in Stuecken hinaufbringen.
@@ -371,7 +416,7 @@ class Client:
                                % (code, d.get('fehler', '')))
         return marke
 
-    def _warte(self, marke):
+    def _warte(self, marke, zeiten=None):
         """Statisch abholen. Kein PHP, kein Kontingent -- der ganze Sinn.
 
         Gewartet wird auf die WARTESCHLANGE, nicht durch wiederholtes Fragen
@@ -388,14 +433,24 @@ class Client:
         """
         bis = time.time() + self.a.frist
         abstand = self.a.abstand
+        begonnen = time.perf_counter()
+        abrufe = 0
         while time.time() < bis:
             code, roh = _hole('%s/ahpt/warteschlange.json' % self.a.basis)
+            abrufe += 1
             if code == 200:
                 try:
                     q = json.loads(roh.decode('utf-8'))
                 except ValueError:
                     q = {}
                 if marke in (q.get('fertig') or []):
+                    # Der Zeitpunkt, an dem die Antwort BEREITLAG. Alles
+                    # davor ist Warten auf den Agenten, alles danach die
+                    # Leitung hierher -- die zwei zu trennen ist der Sinn.
+                    if zeiten is not None:
+                        zeiten['warten_s'] = time.perf_counter() - begonnen
+                        zeiten['abrufe'] = abrufe
+                        zeiten['_bereit'] = time.perf_counter()
                     code, roh = _hole('%s/ahpt/antwort_%s.json'
                                       % (self.a.basis, marke))
                     if code != 200:
@@ -667,6 +722,11 @@ def main():
     ap.add_argument('--konfig', default='client.toml')
     ap.add_argument('--dienst', default='dateien')
     unter = ap.add_subparsers(dest='befehl', required=True)
+    p = unter.add_parser('pruefen',
+                         help='Verbindung messen (ein echter Vorgang)')
+    p.add_argument('pfad', nargs='?', default='',
+                   help='Ordner, der dabei aufgelistet wird')
+
     p = unter.add_parser('liste', help='Ordner auflisten')
     p.add_argument('pfad', nargs='?', default='')
     p = unter.add_parser('hole', help='Datei holen')
@@ -692,6 +752,24 @@ def main():
               file=sys.stderr)
 
     try:
+        if a.befehl == 'pruefen':
+            z = klient.miss_verbindung(a.pfad)
+            print('Ein vollstaendiger Vorgang ueber den ganzen Weg -- dieser')
+            print('Rechner, Vermittler, Agent und zurueck -- hat %.1f s gebraucht.'
+                  % z['gesamt_s'])
+            print()
+            print('   Frage ablegen            %6.0f ms' % (z['frage_s'] * 1000))
+            print('   Warten auf den Agenten   %6.0f ms   (%d Abfrage%s)'
+                  % (z['warten_s'] * 1000, z['abrufe'],
+                     '' if z['abrufe'] == 1 else 'n'))
+            print('   Antwort holen            %6.0f ms' % (z['holen_s'] * 1000))
+            print()
+            print('Gemessen wird die ANTWORTZEIT, nicht der Durchsatz -- eine')
+            print('Auflistung ist klein (%d Eintraege). Ist dieser Wert gut und'
+                  % z['eintraege'])
+            print('AHPT trotzdem zaeh, liegt es nicht an der Strecke hierher.')
+            return 0
+
         if a.befehl == 'liste':
             antw = klient.frage(a.dienst, 'liste', {'pfad': a.pfad})
             if not antw.get('gefunden'):
