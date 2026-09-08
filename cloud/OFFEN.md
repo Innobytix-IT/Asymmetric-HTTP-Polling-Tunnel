@@ -8,26 +8,7 @@ Stand: 08.09.2026
 
 ---
 
-## 1. Die Erfolgsmeldung der App wurde nie auf dem Bildschirm gesehen
-
-Die Verbindungspruefung (`messeVerbindung`, Werkzeugleiste) ist geprueft --
-aber nicht ihre Anzeige im Erfolgsfall.
-
-**Was geprueft ist:** Der Knopf sitzt an der richtigen Stelle (im Emulator
-gesehen), `:app:assembleDebug` laeuft, 16 von 16 Kern-Tests bestehen, und
-das Meldungsfeld kann nicht abschneiden -- es ist eine `Surface` mit
-`fillMaxWidth` und einem `Text` ohne `maxLines`. Dieselbe Logik laeuft im
-Portal und auf der Kommandozeile nachweislich richtig.
-
-**Was fehlt:** ein Bild der Meldung mit echten Zahlen. Beim Versuch verlor
-der Emulator die Netzverbindung.
-
-**Zum Nachholen:** Emulator starten, App gegen einen erreichbaren Vermittler
-richten, Netz-Symbol antippen.
-
----
-
-## 2. Die App verliert ein Byte, wenn der Server per Verbindungsabbau rahmt
+## 1. Die App verliert ein Byte, wenn der Server per Verbindungsabbau rahmt
 
 Am 08.09.2026 im Emulator gemessen:
 
@@ -54,7 +35,7 @@ schlechter als ein bekannter, eingegrenzter Mangel.
 
 ---
 
-## 3. Der Notbehelf in relay.php bleibt vorerst drin
+## 2. Der Notbehelf in relay.php bleibt vorerst drin
 
 `relay.php` schreibt bei abgewiesener Protokollfassung nach
 `ahpt/protokollfehler.log` und nennt sich dort selbst TEMPORAER -- angelegt
@@ -76,7 +57,7 @@ enthaelt nichts Geheimes (Zeitstempel, Aktion, Byte-Zahlen) und ist bei
 
 ---
 
-## 4. `ahpt-portal-lokal.html` kommt in der README nicht vor
+## 3. `ahpt-portal-lokal.html` kommt in der README nicht vor
 
 Der Einrichtungs-Assistent verweist den Anwender ausdruecklich auf diese
 Datei ("muss wirklich AUF diesem Geraet liegen"). Sie ist aber ein
@@ -88,7 +69,7 @@ erfaehrt nirgends, wie daraus die eine wird, von der der Assistent spricht.
 
 ---
 
-## 5. `D:\AHPT Cloud 3000\ahpt` haengt hinter GitHub
+## 4. `D:\AHPT Cloud 3000\ahpt` haengt hinter GitHub
 
 Der oertliche Ordner des Cloud-3000-Abzweigs ist aelter als der Stand im
 Repo: Das `kennung`-Feature (User-Agent, `netz.setze_kennung`) und
@@ -96,3 +77,51 @@ Repo: Das `kennung`-Feature (User-Agent, `netz.setze_kennung`) und
 
 **Wichtig vor jeder Weiterarbeit dort:** erst den Ordner auffrischen. Ein
 Push von oertlich wuerde beides loeschen. GitHub ist der massgebliche Stand.
+
+---
+
+## 5. Abbruch und Einzelsperre der App sind nur im Code geprueft
+
+Von den fuenf Nachruestungen vom 08.09.2026 sind vier auf echter Hardware
+gesehen worden (Fortschritt je Stueck, Restzeit, Uebertragungsdialog,
+Ansehen/Speichern). Zwei Wege nicht:
+
+- **"Abbrechen" waehrend einer laufenden Uebertragung.** Der Rueckruf wird
+  zwischen den Bloecken UND zwischen den Stuecken gefragt, es sollte also
+  spaetestens nach einem Stueck (48 KiB) greifen. Gesehen ist das nicht.
+- **Die Sperre gegen zwei gleichzeitige Uebertragungen.** Sie haengt an
+  einem `AtomicBoolean`; wer waehrend eines Downloads eine zweite Datei
+  antippt, sollte eine Meldung bekommen statt eines zweiten Vorgangs.
+
+**Zum Nachholen:** grosse Datei holen, auf halber Strecke abbrechen -- und
+waehrend sie laeuft eine zweite antippen.
+
+---
+
+## 6. Der Restzeit-Takt laeuft auch, wenn nichts mehr passiert
+
+Der Uebertragungsdialog hat eine eigene Uhr im Sekundentakt, damit die
+Restzeit zwischen zwei Fortschrittsmeldungen weiterlaeuft. Sie zaehlt aber
+stur herunter, auch wenn die Uebertragung wirklich haengt: Bei Null bleibt
+"noch 0 s" stehen, und das sieht dann wieder aus wie der Stillstand, den der
+Dialog gerade beheben sollte.
+
+**Warum nicht sofort behoben:** Was dort stattdessen stehen sollte, haengt
+davon ab, wie oft das im Betrieb ueberhaupt vorkommt. "Dauert laenger als
+gedacht" waere ehrlich, ist aber geraten, solange niemand einen Fall gesehen
+hat.
+
+---
+
+## Erledigt
+
+- **08.09.2026 -- Die Erfolgsmeldung der App auf dem Bildschirm gesehen.**
+  Auf einem SM-G970F gegen den echten Webspace:
+
+  ```
+  Verbindung steht. Ein Rundlauf hat 1,1 s gebraucht.
+  Frage ablegen: 91 ms / Warten auf den Agenten: 896 ms (3 Abfragen) /
+  Antwort holen: 67 ms
+  ```
+
+  Damit ist auch die Sorge erledigt, das Meldungsfeld koenne abschneiden.
