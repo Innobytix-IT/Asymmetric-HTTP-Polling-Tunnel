@@ -60,6 +60,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 
@@ -333,11 +334,36 @@ def main():
 
         feld_runter = zahlfeld('herunter', leitung.get('herunter_mbit'))
         feld_hoch = zahlfeld('hinauf', leitung.get('hinauf_mbit'))
-        tk.Label(r, text='Freilassen, wenn du sie nicht weisst -- dann '
-                         'fehlt nur der Satz, ob der Vermittler oder deine '
-                         'Leitung bremst.',
-                 bg=GRUND, fg=LEISE, font=SCHRIFT, anchor='w', justify='left',
-                 wraplength=560).pack(fill='x', pady=(0, 12))
+        knopf(lz, 'Nachmessen', lambda: leitung_messen()).pack(side='left')
+
+        herkunft = tk.Label(r, text='', bg=GRUND, fg=LEISE, font=SCHRIFT,
+                            anchor='w', justify='left', wraplength=560)
+        herkunft.pack(fill='x', pady=(0, 12))
+
+        def herkunft_zeigen():
+            """WOHER die Zahl stammt, gehoert danebengeschrieben.
+
+            Ein gemessener Wert und ein getippter sehen im Feld gleich aus,
+            verdienen aber nicht dasselbe Vertrauen -- und wer vor drei
+            Monaten gemessen hat, soll das sehen, statt sich auf eine alte
+            Zahl zu verlassen.
+            """
+            d = einrichten.leitung_lesen()
+            if d.get('quelle') == 'gemessen':
+                wo = d.get('ort') or d.get('knoten') or ''
+                t = ('Gemessen am %s%s.'
+                     % (time.strftime('%d.%m.%Y',
+                                      time.localtime(d.get('zeit', 0))),
+                        ' in ' + wo if wo else ''))
+            elif d.get('hinauf_mbit') or d.get('herunter_mbit'):
+                t = ('Von dir eingetragen. "Nachmessen" ermittelt die '
+                     'wirklichen Werte -- die Vertragsrate stimmt oft nicht.')
+            else:
+                t = ('Freilassen, wenn du sie nicht weisst -- dann fehlt nur '
+                     'der Satz, ob der Vermittler oder deine Leitung bremst.')
+            herkunft.configure(text=t)
+
+        herkunft_zeigen()
 
         urteil = tk.Label(r, text='', bg=GRUND, fg=LEISE, font=SCHRIFT,
                           anchor='w', justify='left', wraplength=560)
@@ -495,6 +521,92 @@ def main():
                        e.get('warten_agent_s', 0) + e.get('warten_client_s', 0)),
                     'gut'))
             schreib(zeilen)
+
+        # ------------------------------------------- Leitung nachmessen
+        #
+        # DIE GUI STARTET DAS EIGENSTAENDIGE PROGRAMM, sie uebernimmt seinen
+        # Code nicht. Das ist der Unterschied, auf den es ankommt:
+        # miss_leitung.py bleibt das einzige Stueck AHPT, das mit einem
+        # Dritten redet, es bleibt einzeln aufrufbar, und wer es loescht
+        # verliert nur diesen Knopf.
+        #
+        # DIE RUECKFRAGE MUSS TROTZDEM HIER STEHEN. Der Aufruf geht mit
+        # --ja hinaus, also ohne die Rueckfrage der Konsolenfassung -- und
+        # eine Einwilligung, die man umgeht, ist keine. Wer hier zustimmt,
+        # hat dieselben Angaben gesehen wie dort.
+        #
+        # Und danach geht es von SELBST weiter zum Vermittlertest: Die
+        # Leitung zu messen ist kein Selbstzweck, sondern der Anlauf. Wer
+        # zwei Minuten auf eine Zahl gewartet hat, soll nicht noch einmal
+        # einen Knopf suchen muessen.
+        def leitung_messen():
+            werkzeug = os.path.join(HIER, 'miss_leitung.py')
+            if not os.path.isfile(werkzeug):
+                urteil.configure(text='miss_leitung.py liegt nicht neben mir.',
+                                 fg=FEHLER)
+                return
+            from tkinter import messagebox
+            if not messagebox.askyesno(
+                    'Leitung nachmessen',
+                    'Dazu wird speed.cloudflare.com angerufen -- der einzige '
+                    'fremde Rechner, mit dem AHPT je redet.\n\n'
+                    'Er erfaehrt deine oeffentliche IP-Adresse und dass hier '
+                    'gemessen wird. Sonst nichts: kein Name, nicht die '
+                    'Adresse deines Webspace, kein Inhalt.\n\n'
+                    'Es kostet je nach Leitung etwa 10 bis 200 MB Verkehr. '
+                    'Am Handy-Tethering ist das Geld.\n\n'
+                    'Danach laeuft der Vermittlertest automatisch weiter.\n\n'
+                    'Jetzt messen?', parent=w, default='no'):
+                return
+            los.configure(state='disabled')
+            urteil.configure(text='Leitung wird gemessen ...', fg=LEISE)
+            schreib([('Der Speedtest laeuft. Das dauert etwa zwanzig '
+                      'Sekunden.', 'gut')])
+
+            def lauf():
+                zeilen = []
+                try:
+                    p = subprocess.Popen(
+                        [sys.executable, werkzeug, '--ja'], cwd=HIER,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1)
+                except Exception as ex:
+                    w.after(0, fehlschlag, 'Der Speedtest liess sich nicht '
+                                           'starten: %s' % ex)
+                    return
+                for zeile in p.stdout:
+                    zeile = zeile.rstrip()
+                    zeilen.append(zeile)
+                    del zeilen[:-25]
+                    if zeile.strip():
+                        w.after(0, urteil.configure,
+                                {'text': zeile.strip(), 'fg': LEISE})
+                if p.wait() != 0:
+                    w.after(0, fehlschlag,
+                            'Der Speedtest ist fehlgeschlagen. Die Werte '
+                            'lassen sich von Hand eintragen.\n\n'
+                            + '\n'.join(z for z in zeilen if z.strip()))
+                    return
+                w.after(0, leitung_uebernehmen)
+
+            threading.Thread(target=lauf, daemon=True).start()
+
+        def fehlschlag(text):
+            los.configure(state='normal')
+            urteil.configure(text='Leitung nicht gemessen.', fg=WARN)
+            schreib([(text, 'warn')])
+
+        def leitung_uebernehmen():
+            """Felder nachfuehren und ohne Umweg weitermessen."""
+            d = einrichten.leitung_lesen()
+            for f, k in ((feld_runter, 'herunter_mbit'),
+                         (feld_hoch, 'hinauf_mbit')):
+                f.delete(0, 'end')
+                if d.get(k):
+                    f.insert(0, '%g' % d[k])
+            herkunft_zeigen()
+            los.configure(state='normal')
+            messen()
 
         def messen():
             los.configure(state='disabled', text='Messen ...')

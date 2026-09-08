@@ -90,6 +90,34 @@ def pruefe_ohne_php(einrichten):
            'nach langem Lauf hoechstens der Deckel von 1.5 s (%.3f s)'
            % w(30.0, 0.0))
 
+    print('== 3. Die Herkunft der Leitungsangabe bleibt erhalten')
+    # miss_leitung.py schreibt "gemessen". Wenn das Messfenster danach
+    # speichert, OHNE dass jemand die Felder angefasst hat, darf daraus
+    # nicht "eingetragen" werden -- sonst steht dort eine Herkunft, die
+    # nicht stimmt, und ein gemessener Wert verliert sein Gewicht.
+    import json
+    import tempfile
+    import time as _t
+    ordner = tempfile.mkdtemp(prefix='ahpt_leitung_')
+    alt_datei = einrichten.LEITUNG_DATEI
+    try:
+        einrichten.LEITUNG_DATEI = os.path.join(ordner, 'leitung.json')
+        with open(einrichten.LEITUNG_DATEI, 'w') as f:
+            json.dump({'herunter_mbit': 54.5, 'hinauf_mbit': 20.4,
+                       'quelle': 'gemessen', 'zeit': _t.time(),
+                       'knoten': 'FRA'}, f)
+        einrichten.leitung_schreiben(20.4, 54.5)
+        pruefe(einrichten.leitung_lesen().get('quelle') == 'gemessen',
+               'unveraendert gespeichert -> bleibt "gemessen"')
+        einrichten.leitung_schreiben(20.4, 100)
+        pruefe(einrichten.leitung_lesen().get('quelle') == 'eingetragen',
+               'von Hand geaendert -> wird "eingetragen"')
+        pruefe(einrichten.leitung_lesen().get('herunter_mbit') == 100,
+               'und der neue Wert steht drin')
+    finally:
+        einrichten.LEITUNG_DATEI = alt_datei
+        shutil.rmtree(ordner, ignore_errors=True)
+
 
 def main():
     import einrichten
@@ -127,7 +155,7 @@ def main():
         einrichten._geheimnis_lesen = lambda: geheim
         basis = 'http://127.0.0.1:%d' % PORT
 
-        print('== 3. Ein vollstaendiger Rundlauf')
+        print('== 4. Ein vollstaendiger Rundlauf')
         verlauf = []
         e = einrichten.vermittler_messen(basis, melde=verlauf.append,
                                          groesse=256 * 1024)
@@ -135,7 +163,7 @@ def main():
                'ohne Abbruch (%s)' % (e.get('fehler') or 'nichts'))
         pruefe(e['verdikt'] in ('gut', 'lahm'), 'Verdikt: %s' % e['verdikt'])
 
-        print('== 4. Die Zahlen sind plausibel')
+        print('== 5. Die Zahlen sind plausibel')
         # Base64 blaeht um genau ein Drittel auf. Kommt etwas anderes
         # heraus, wurde nicht das gemessen, was der Agent wirklich schickt.
         soll = 256 * 1024 * 4 / 3
@@ -162,7 +190,7 @@ def main():
         pruefe(len(verlauf) >= 5,
                '%d Fortschrittsmeldungen' % len(verlauf))
 
-        print('== 5. Die eigene Leitung als Vergleichsgroesse')
+        print('== 6. Die eigene Leitung als Vergleichsgroesse')
         # Dieselbe Messung, zwei Vertragsraten -- und zwei verschiedene
         # Befunde. Genau das ist der Zweck: Ein Vermittler, der die Leitung
         # ausschoepft, ist nicht lahm, sondern fertig.
@@ -186,24 +214,24 @@ def main():
                'und der Satz sagt: nicht dein Anschluss')
         einrichten.leitung_schreiben(None, None)
 
-        print('== 6. Das Messfenster wird wieder geschlossen')
+        print('== 7. Das Messfenster wird wieder geschlossen')
         # Bleibt es stehen, zaehlt der Agent dauerhaft keine abgewiesenen
         # Fragen mehr -- und genau darauf soll man sich verlassen koennen.
         pruefe(not os.path.exists(einrichten.MESS_FENSTER),
                'messung_laeuft ist weg')
 
-        print('== 7. Die Warteschlange bleibt aufgeraeumt')
+        print('== 8. Die Warteschlange bleibt aufgeraeumt')
         st = einrichten._relay_selbsttest(basis)
         pruefe(st is not None and st.get('offen') == 0,
                'keine offene Marke zurueckgelassen (offen=%s)'
                % (st or {}).get('offen'))
 
-        print('== 8. Der Verlauf wurde fortgeschrieben')
+        print('== 9. Der Verlauf wurde fortgeschrieben')
         v = einrichten._messungen_lesen()
         pruefe(len(v) == 3 and all(x.get('arbeit_s') for x in v),
                '%d Eintraege im Verlauf' % len(v))
 
-        print('== 9. Ist er weg, sagt die Messung das -- und raet nicht')
+        print('== 10. Ist er weg, sagt die Messung das -- und raet nicht')
         php.send_signal(signal.SIGTERM)
         php.wait(timeout=10)
         php = None

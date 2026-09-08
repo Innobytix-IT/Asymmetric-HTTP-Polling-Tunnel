@@ -753,7 +753,13 @@ def leitung_lesen():
 
 
 def leitung_schreiben(hinauf_mbit, herunter_mbit):
-    """Speichert die Vertragsrate. 0 oder None heisst: nicht angegeben."""
+    """Speichert die eingetragene Rate. 0 oder None heisst: nicht angegeben.
+
+    Aendert sich nichts, wird auch NICHTS geschrieben. Sonst wuerde jeder
+    Druck auf "Messen" einen von miss_leitung.py gemessenen Wert zu einem
+    "eingetragenen" umstempeln, obwohl niemand ihn angefasst hat -- und die
+    Herkunftsangabe daneben waere gelogen.
+    """
     d = {}
     for name, wert in (('hinauf_mbit', hinauf_mbit),
                        ('herunter_mbit', herunter_mbit)):
@@ -763,6 +769,12 @@ def leitung_schreiben(hinauf_mbit, herunter_mbit):
             continue
         if 0 < f <= 100000:
             d[name] = f
+    alt = leitung_lesen()
+    if all(abs(d.get(k, 0) - alt.get(k, 0)) < 0.05
+           for k in ('hinauf_mbit', 'herunter_mbit')):
+        return alt
+    d['quelle'] = 'eingetragen'
+    d['zeit'] = time.time()
     try:
         os.makedirs(KONFIG_ORDNER, exist_ok=True)
         tmp = LEITUNG_DATEI + '.neu'
@@ -1002,6 +1014,14 @@ def _rundlauf(basis, geheimnis, groesse, sag):
                 e['fehler'] = ('Stueck %d von %d abgewiesen (HTTP %s, %s).'
                                % (i + 1, len(stuecke), code,
                                   d.get('fehler', 'ohne Begruendung')))
+                if code == 403:
+                    # Der haeufigste Fall, und ohne diesen Satz raetselhaft:
+                    # Man misst einen ANDEREN Webspace als den eigenen.
+                    e['fehler'] += (
+                        ' Das hier hinterlegte Geheimnis passt nicht zu '
+                        'diesem Vermittler. Bei einem fremden Webspace ist '
+                        'das der Normalfall -- gemessen werden kann nur, wo '
+                        'derselbe Agent zu Hause ist.')
                 return e
         e['ablegen_s'] = time.perf_counter() - t0
 
