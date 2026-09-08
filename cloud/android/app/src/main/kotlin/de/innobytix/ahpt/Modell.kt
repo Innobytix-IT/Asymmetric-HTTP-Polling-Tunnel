@@ -445,10 +445,21 @@ class Modell(app: Application) : AndroidViewModel(app) {
 
         // Ohne diese Hinweise ist "der Ordner ist leer" nicht von "hier ist
         // alles gesperrt" zu unterscheiden.
+        //
+        // Die Namen muessen WOERTLICH die des Agenten sein (handler/datei.py,
+        // `ergebnis[...]`). Hier stand fuer den dritten Fall `gefiltert`, der
+        // Agent schickt aber `endung_gesperrt` -- damit ist dieser Hinweis
+        // nie erschienen, und zwar still: `optInt` liefert fuer einen
+        // unbekannten Namen brav die Vorgabe 0, also "nichts gesperrt".
+        // Ausgerechnet der Fall, der am meisten weh tut -- eine Datei liegt
+        // da und wird nicht gezeigt -- war der unsichtbare. Am 09.09.2026
+        // beim Nachlesen gefunden, nicht im Betrieb: Ein Hinweis, der fehlt,
+        // faellt niemandem auf.
         val hinweise = buildList {
             if (a.has("gekappt")) add("nur die ersten ${a.optInt("gekappt")} Eintraege")
             if (a.optInt("versteckt", 0) > 0) add("${a.optInt("versteckt")} versteckte")
-            if (a.optInt("gefiltert", 0) > 0) add("${a.optInt("gefiltert")} nach Endung gesperrt")
+            if (a.optInt("endung_gesperrt", 0) > 0)
+                add("${a.optInt("endung_gesperrt")} nach Endung gesperrt")
         }
         _zustand.update {
             it.copy(
