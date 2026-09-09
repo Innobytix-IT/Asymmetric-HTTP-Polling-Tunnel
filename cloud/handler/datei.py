@@ -338,7 +338,24 @@ class DateiHandler(Handler):
                 gekappt = len(alle) > MAX_EINTRAEGE
                 for name in alle[:MAX_EINTRAEGE]:
                     if name.startswith('.'):
-                        versteckt += 1
+                        # Der EIGENE Sammelordner zaehlt nicht mit.
+                        #
+                        # `versteckt` soll heissen: "Eintraege VON DIR, die
+                        # ich verborgen habe". TEIL_ORDNER ist keiner davon
+                        # -- den legt dieser Handler selbst an, er liegt in
+                        # jeder Wurzel, und er verschwindet nie. Mitgezaehlt
+                        # stuende der Hinweis "1 versteckte" dauerhaft auf
+                        # dem Schirm, fuer etwas voellig Normales. Eine
+                        # Anzeige, die immer an ist, lernt man zu
+                        # uebersehen -- und dann uebersieht man sie auch,
+                        # wenn sie einmal etwas Echtes meldet.
+                        #
+                        # Nur in der WURZEL: Legt jemand tiefer im Baum
+                        # einen Ordner desselben Namens an, ist das seiner,
+                        # und der zaehlt.
+                        if not (ordner == self.wurzel
+                                and name == self.TEIL_ORDNER):
+                            versteckt += 1
                         continue         # versteckt bleibt versteckt
                     voll = os.path.join(ordner, name)
                     # Schranke 2 auch beim Auflisten: eine Verknuepfung, die
