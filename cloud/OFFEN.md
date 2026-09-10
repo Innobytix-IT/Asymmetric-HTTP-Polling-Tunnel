@@ -4,7 +4,7 @@ Was bekannt ist und absichtlich noch nicht erledigt. Kein Wunschzettel --
 hier steht nur, was jemand aufgeschrieben hat, weil er es sonst vergisst,
 mitsamt dem Grund, warum es liegen blieb.
 
-Stand: 08.09.2026
+Stand: 10.09.2026
 
 ---
 
@@ -72,6 +72,37 @@ wiederkommt, steht die Antwort in einer Zeile.
 Nebenbei: Die Datei laege im oeffentlich lesbaren Ablage-Ordner. Sie
 enthaelt nichts Geheimes (Zeitstempel, Aktion, Byte-Zahlen) und ist bei
 1 MB gedeckelt.
+
+---
+
+## 3. Die CI liegt bereit, darf aber nicht hochgeladen werden
+
+`.github/workflows/pruefungen-cloud.yml` ist geschrieben und laeuft alle
+Pruefungen bei jedem Push: Noise IK in Python und JavaScript, grosse
+Dateien, Listen-Zaehler, relay.php, Messung und Messfenster gegen einen
+echten `php -S`, den Durchstich gegen die Attrappe samt Client in
+JavaScript, dazu den Android-Kern.
+
+**Warum sie nicht im Repo steht:** GitHub weist jede Datei unter
+`.github/workflows/` ab, wenn der Zugangstoken die Berechtigung
+`workflow` nicht hat. Der hier hat `gist, read:org, repo` -- die Antwort
+ist ein schlichtes 404.
+
+**Zum Nachholen** -- einmalig, und nur Manuel kann es:
+
+```
+gh auth refresh -s workflow
+```
+
+Danach laesst sich die Datei ganz gewoehnlich hochladen. Beim ersten Lauf
+gehoert nachgesehen, ob die Ablaufumgebung wirklich alles mitbringt --
+behauptet ist das, gesehen noch nicht.
+
+**Was NICHT hineingehoert:** `tests/durchstich.sh` und
+`tests/pruefe_portal_live.cjs`. Beide brauchen einen echten Webspace und
+einen laufenden Agenten, also Zugangsdaten -- und ein Geheimnis in einem
+CI-Lauf ist ein Geheimnis, das aus dem Haus ist. Der Durchstich gegen
+einen echten Vermittler bleibt Handarbeit.
 
 ---
 
@@ -145,3 +176,31 @@ enthaelt nichts Geheimes (Zeitstempel, Aktion, Byte-Zahlen) und ist bei
   ein Stueck von 48 KiB ueber eine schlechte Mobilfunkstrecke gut dreizehn
   Sekunden dauern kann; das ist langsam, nicht kaputt. Ist die Schaetzung
   aufgebraucht, kommt aber noch etwas an, heisst es "gleich fertig".
+
+- **10.09.2026 -- Das Projekt einmal als Fremder benutzt.** Repo geklont,
+  Anleitung befolgt. Vier Befunde, alle behoben:
+
+  1. **Jeder Windows-Klon war kaputt.** Git fuer Windows setzt
+     `core.autocrlf=true`; ohne `.gitattributes` kamen 47 Dateien in CRLF
+     an, darunter `ausliefern.sh`, `relay.php` und `durchstich.sh`. Alles
+     davon landet auf Linux, wo ein Shellskript mit `
+` hinter der
+     Shebang mit "bad interpreter" abbricht. Nach dem Klonen jetzt: eine
+     Datei mit CRLF, und das ist `gradlew.bat`, wo es hingehoert.
+  2. **Der Agent stuerzte ab, wenn `[krypto]` fehlt** -- und "keine" ist
+     die Vorgabe. `AttributeError` statt der Erklaerung, die danebensteht.
+     Dabei fiel auf, dass `lege_block` in der Liste der schreibenden
+     Aktionen fehlte: Die Schranke liess sich ueber den Blockweg umgehen.
+  3. **Zwei Pruefungen waren seit Wochen rot** und niemand hatte es
+     gemerkt. Die Schlangen-Pruefung mass die Vorbereitung mit (`kern/`
+     hat MAX_JE_IP 5, `cloud/` 20 -- der Test wurde beim Erhoehen nicht
+     mitgezogen), und die Zeilenenden-Pruefung meldete Windows-Dateien.
+  4. **Es gab keine weitergebbare Fassung der App.** `release` kann jetzt
+     signieren, ohne dass Schluesselspeicher oder Passwort ins Repo
+     geraten.
+
+  Gegengeprueft mit je einem frischen Klon: auf Linux laufen alle sieben
+  Suiten durch, unter Windows bauen Debug- und Release-Fassung.
+
+  **Derselbe Fehler 3 steckt unveraendert in `cloud3000/`** -- gleiche
+  Datei, gleiche Zahlen. Nicht angefasst, weil nicht gefragt.
