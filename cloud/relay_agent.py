@@ -345,32 +345,6 @@ class Aufbau:
                                        'statt 32' % (c, len(b)))
                 self.clients.add(b)
 
-        # SCHREIBENDE AKTIONEN NUR VERSCHLUESSELT.
-        #
-        # `lege` und `neuer_ordner` legen Bytes auf dem Heimserver ab. Ohne
-        # Verschluesselung koennte JEDER, der die Adresse des Webspace kennt,
-        # eine solche Frage einstellen -- der Vermittler kann Freund und Feind
-        # nicht unterscheiden, und ohne Noise gibt es keinen Absender, den man
-        # pruefen koennte.
-        #
-        # Das wird hier BEIM START abgewiesen, nicht im Betrieb: Ein Agent,
-        # der monatelang mit offener Schreibfreigabe laeuft, faellt niemandem
-        # auf, bevor es zu spaet ist.
-        SCHREIBT = {'lege', 'neuer_ordner'}
-        if self.verfahren == 'keine':
-            for name, (h, erlaubte) in self.dienste.items():
-                schlimm = SCHREIBT & set(erlaubte)
-                if schlimm:
-                    raise KonfigFehler(
-                        'Dienst "%s" gibt %s frei, aber [krypto] verfahren ist '
-                        '"keine".'
-                        '         Schreibende Aktionen ohne Verschluesselung '
-                        'heissen: jeder, der die Adresse kennt, darf Dateien '
-                        'auf deinem Heimserver ablegen.'
-                        '         Entweder verfahren = "noise_ik" setzen oder '
-                        'die Aktion streichen.'
-                        % (name, ', '.join(sorted(schlimm))))
-
         # DIE ZURUECKGESTELLTE PRUEFUNG DER BASIS.
         #
         # Ohne Verschluesselung gilt die alte Regel unveraendert: nur https,
@@ -457,6 +431,46 @@ class Aufbau:
             # Die Weissliste ist der Schnitt aus dem, was der Handler kann,
             # und dem, was die Konfiguration freigibt. Nie die Vereinigung.
             self.dienste[name] = (h, frozenset(erlaubt))
+
+        # SCHREIBENDE AKTIONEN NUR VERSCHLUESSELT.
+        #
+        # `lege` und `neuer_ordner` legen Bytes auf dem Heimserver ab. Ohne
+        # Verschluesselung koennte JEDER, der die Adresse des Webspace kennt,
+        # eine solche Frage einstellen -- der Vermittler kann Freund und Feind
+        # nicht unterscheiden, und ohne Noise gibt es keinen Absender, den man
+        # pruefen koennte.
+        #
+        # Das wird BEIM START abgewiesen, nicht im Betrieb: Ein Agent, der
+        # monatelang mit offener Schreibfreigabe laeuft, faellt niemandem auf,
+        # bevor es zu spaet ist.
+        #
+        # HIER UNTEN, NICHT WEITER OBEN. Bis zum 10.09.2026 stand diese
+        # Pruefung VOR der Schleife, die `self.dienste` ueberhaupt erst
+        # anlegt. Sie lief damit in ein AttributeError -- und zwar bei JEDER
+        # Konfiguration ohne [krypto]-Abschnitt, denn die Vorgabe fuer
+        # `verfahren` ist "keine". Wer die Anleitung befolgt und den
+        # Abschnitt weglaesst, bekam einen Python-Auszug statt der Erklaerung,
+        # die hier unten steht. Gefunden hat es `durchstich_lokal.py`, das
+        # genau so eine Konfiguration schreibt -- die Pruefung war rot, nur
+        # hat sie niemand laufen lassen.
+        #
+        # `lege_block` gehoert dazu. Es legt genauso Bytes ab wie `lege`,
+        # nur ueber mehrere Fragen verteilt; es zu vergessen hiesse, die
+        # Schranke ueber den Blockweg umgehen zu koennen.
+        SCHREIBT = {'lege', 'lege_block', 'neuer_ordner'}
+        if self.verfahren == 'keine':
+            for name, (h, erlaubte) in self.dienste.items():
+                schlimm = SCHREIBT & set(erlaubte)
+                if schlimm:
+                    raise KonfigFehler(
+                        'Dienst "%s" gibt %s frei, aber [krypto] verfahren ist '
+                        '"keine".\n'
+                        '         Schreibende Aktionen ohne Verschluesselung '
+                        'heissen: jeder, der die Adresse kennt, darf Dateien '
+                        'auf deinem Heimserver ablegen.\n'
+                        '         Entweder verfahren = "noise_ik" setzen oder '
+                        'die Aktion streichen.'
+                        % (name, ', '.join(sorted(schlimm))))
 
     def geheimnis(self):
         with open(self.geheimnis_datei, 'r', encoding='utf-8') as f:

@@ -204,14 +204,41 @@ def main():
         # Zwei lokale Kontrollen hatten es davor NICHT gefunden: Python liest
         # im Textmodus und wandelt CRLF unbemerkt in LF um. Wer Zeilenenden
         # pruefen will, muss die Datei binaer lesen.
+        #
+        # GEPRUEFT WIRD, WAS AUF EINEM LINUX-RECHNER LANDET -- nicht jede
+        # Datei, die zufaellig im Ordner liegt. Die erste Fassung lief ueber
+        # alles und meldete deshalb zwei Sorten Fehlalarm:
+        #
+        #   * `gradlew.bat` -- eine Windows-Stapeldatei MUSS CRLF haben,
+        #     sonst liest der Befehlsinterpreter Sprungmarken falsch. Seit
+        #     dem 10.09.2026 steht das auch so in der .gitattributes.
+        #   * Binaerdateien wie `gradle-wrapper.jar`, in denen die beiden
+        #     Bytes zufaellig vorkommen duerfen.
+        #
+        # Dazu kamen Notizen und Entwuerfe, die neben dem Projekt liegen und
+        # nirgendwohin hochgeladen werden. Deshalb eine ausdrueckliche Liste
+        # dessen, was wir ausliefern, statt "alles ausser". Wer eine neue
+        # Dateiart einfuehrt, traegt sie hier ein -- eine Zeile Arbeit, und
+        # sie verhindert, dass die Pruefung still loechrig wird.
+        AUSGELIEFERT = ('.py', '.pyw', '.php', '.js', '.cjs', '.json', '.md',
+                        '.sh', '.toml', '.kt', '.kts', '.xml', '.html',
+                        '.properties')
+        OHNE_ENDUNG = ('htaccess-beispiel', 'htaccess-ablage-beispiel',
+                       'LICENSE', 'gradlew')
         krumm = []
         for w, o, ds in os.walk(WURZEL):
-            o[:] = [x for x in o if x not in ('Kopie', '__pycache__', '.git')]
+            o[:] = [x for x in o if x not in ('Kopie', '__pycache__', '.git',
+                                              'build', '.gradle', '.idea')]
             for d in ds:
+                if not (d.endswith(AUSGELIEFERT) or d in OHNE_ENDUNG):
+                    continue
                 p = os.path.join(w, d)
                 with open(p, 'rb') as f:          # BINAER, nicht als Text
-                    if b'\r\n' in f.read():
-                        krumm.append(os.path.relpath(p, WURZEL))
+                    roh = f.read()
+                if b'\x00' in roh:               # doch binaer
+                    continue
+                if b'\r\n' in roh:
+                    krumm.append(os.path.relpath(p, WURZEL))
         pruefe('alle Dateien haben Unix-Zeilenenden', not krumm,
                ', '.join(krumm[:4]))
 
@@ -403,16 +430,36 @@ def main():
         w2 = os.path.join(basis_ordner, 'jam2')
         a2 = attrappe_relay.Ablage(w2, geheimnis)
         angreifer = ['2001:db8:0:%d::1' % i for i in range(8)]
-        for adr in angreifer:
-            for _ in range(attrappe_relay.MAX_JE_IP):
-                leere_frage(a2, adr)
+        # REIHUM, nicht MAX_JE_IP am Stueck.
+        #
+        # Die erste Fassung liess jeden Angreifer seine vollen MAX_JE_IP
+        # Plaetze belegen. Im kern-Zweig geht das auf: dort ist MAX_JE_IP
+        # gleich 5, acht Angreifer fuellen die 40 Plaetze also GENAU. In
+        # AHPT Cloud steht die Zahl auf 20, weil hier ein einzelner Nutzer
+        # dahintersteht -- damit fordern acht Angreifer 160 Plaetze fuer
+        # eine Schlange von 40, und es wird schon beim Fuellen verdraengt.
+        # Die Pruefung darunter mass danach die Verdraengungen der
+        # VORBEREITUNG statt die des Besuchers und meldete 56 statt 1.
+        #
+        # Reihum belegt jeder gleich viel, die Schlange wird genau voll,
+        # und niemand ist bis dahin verdraengt worden. Das haelt auch,
+        # wenn jemand an den Zahlen dreht.
+        i = 0
+        while len(a2.offen) < attrappe_relay.MAX_OFFEN and i < 10 * attrappe_relay.MAX_OFFEN:
+            leere_frage(a2, angreifer[i % len(angreifer)])
+            i += 1
         pruefe('Schlange ist voll', len(a2.offen) == attrappe_relay.MAX_OFFEN,
                str(len(a2.offen)))
+        pruefe('beim Fuellen musste noch niemand weichen', a2.verdraengt == 0,
+               str(a2.verdraengt))
+        vorher = a2.verdraengt
         code, d = leere_frage(a2, '2001:db8:99:99::1')
         pruefe('echter Besucher kommt trotz voller Schlange durch',
                code == 200, 'HTTP %s %s' % (code, d.get('fehler', '')))
-        pruefe('dafuer wurde genau ein Platz verdraengt', a2.verdraengt == 1,
-               str(a2.verdraengt))
+        # Der UNTERSCHIED, nicht der Gesamtstand -- sonst misst die Pruefung
+        # wieder die Vorbereitung mit.
+        pruefe('dafuer wurde genau ein Platz verdraengt',
+               a2.verdraengt - vorher == 1, str(a2.verdraengt - vorher))
         pruefe('verdraengt wurde beim Vielhalter, nicht beim Neuen',
                sum(1 for e in a2.offen
                    if e['wer'] == a2.offen[-1]['wer']) == 1)
