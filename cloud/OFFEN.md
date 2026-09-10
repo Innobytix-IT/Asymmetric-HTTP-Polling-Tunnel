@@ -183,8 +183,7 @@ einen echten Vermittler bleibt Handarbeit.
   1. **Jeder Windows-Klon war kaputt.** Git fuer Windows setzt
      `core.autocrlf=true`; ohne `.gitattributes` kamen 47 Dateien in CRLF
      an, darunter `ausliefern.sh`, `relay.php` und `durchstich.sh`. Alles
-     davon landet auf Linux, wo ein Shellskript mit `
-` hinter der
+     davon landet auf Linux, wo ein Shellskript mit `\r` hinter der
      Shebang mit "bad interpreter" abbricht. Nach dem Klonen jetzt: eine
      Datei mit CRLF, und das ist `gradlew.bat`, wo es hingehoert.
   2. **Der Agent stuerzte ab, wenn `[krypto]` fehlt** -- und "keine" ist
