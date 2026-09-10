@@ -53,6 +53,15 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Die EINE Abhaengigkeit ausserhalb der Standardbibliothek. Sie steht
+      # in cloud/README.md ("pip install cryptography -- nur fuer die
+      # Verschluesselung noetig"); hier fehlte sie im ersten Anlauf, und der
+      # erste Lauf ist prompt darueber gestolpert. Genau dafuer laesst man
+      # ihn laufen: Auf jedem Rechner, auf dem bisher entwickelt wurde, war
+      # das Paket laengst da.
+      - name: cryptography einrichten
+        run: python3 -m pip install --quiet cryptography
+
       # php-cli wird von pruefe_relay_php.py, pruefe_messung.py und
       # pruefe_messfenster.py gebraucht: Sie stellen einen echten
       # `php -S` als Wegwerf-Vermittler auf. Ohne php ueberspringen sich
