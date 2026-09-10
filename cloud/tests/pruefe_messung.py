@@ -219,8 +219,13 @@ def main():
         # Am 10.09.2026 im ersten CI-Lauf genau so passiert: 304 Mbit/s
         # ueber die Rueckschleife des Laeufers, waehrend derselbe Test auf
         # dem Heimserver durchlief.
+        # Und BEIDE Werte weiten, nicht nur den fuer das Ablegen. Der
+        # zweite Parameter ist die Herunter-Leitung; blieb er bei 1000
+        # Mbit/s, kam der zweite CI-Lauf auf 275 Mbit/s Durchsatz -- also
+        # 27 %, und damit wieder in die Luecke zwischen den Schwellen.
         schnellste = max(e.get('ablegen_bps') or 0, e.get('abholen_bps') or 0)
-        einrichten.leitung_schreiben(round(schnellste * 8 / 1e6 * 20, 2), 1000)
+        weit = round(schnellste * 8 / 1e6 * 20, 2)
+        einrichten.leitung_schreiben(weit, weit)
         e_weit = einrichten.vermittler_messen(basis, groesse=256 * 1024)
         pruefe((e_weit.get('anteil_hinauf') or 1) < 0.25,
                'weite Leitung -> niedriger Anteil (%.0f %%)'
