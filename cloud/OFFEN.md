@@ -75,37 +75,6 @@ enthaelt nichts Geheimes (Zeitstempel, Aktion, Byte-Zahlen) und ist bei
 
 ---
 
-## 3. Die CI liegt bereit, darf aber nicht hochgeladen werden
-
-`.github/workflows/pruefungen-cloud.yml` ist geschrieben und laeuft alle
-Pruefungen bei jedem Push: Noise IK in Python und JavaScript, grosse
-Dateien, Listen-Zaehler, relay.php, Messung und Messfenster gegen einen
-echten `php -S`, den Durchstich gegen die Attrappe samt Client in
-JavaScript, dazu den Android-Kern.
-
-**Warum sie nicht im Repo steht:** GitHub weist jede Datei unter
-`.github/workflows/` ab, wenn der Zugangstoken die Berechtigung
-`workflow` nicht hat. Der hier hat `gist, read:org, repo` -- die Antwort
-ist ein schlichtes 404.
-
-**Zum Nachholen** -- einmalig, und nur Manuel kann es:
-
-```
-gh auth refresh -s workflow
-```
-
-Danach laesst sich die Datei ganz gewoehnlich hochladen. Beim ersten Lauf
-gehoert nachgesehen, ob die Ablaufumgebung wirklich alles mitbringt --
-behauptet ist das, gesehen noch nicht.
-
-**Was NICHT hineingehoert:** `tests/durchstich.sh` und
-`tests/pruefe_portal_live.cjs`. Beide brauchen einen echten Webspace und
-einen laufenden Agenten, also Zugangsdaten -- und ein Geheimnis in einem
-CI-Lauf ist ein Geheimnis, das aus dem Haus ist. Der Durchstich gegen
-einen echten Vermittler bleibt Handarbeit.
-
----
-
 ## Erledigt
 
 - **08.09.2026 -- Die Erfolgsmeldung der App auf dem Bildschirm gesehen.**
@@ -203,3 +172,27 @@ einen echten Vermittler bleibt Handarbeit.
 
   **Derselbe Fehler 3 steckt unveraendert in `cloud3000/`** -- gleiche
   Datei, gleiche Zahlen. Nicht angefasst, weil nicht gefragt.
+
+- **10.09.2026 -- Die CI laeuft.** `.github/workflows/pruefungen-cloud.yml`
+  stoesst bei jedem Push auf `cloud/` rund 220 Pruefungen an: Noise IK in
+  Python und JavaScript, grosse Dateien, Listen-Zaehler, `relay.php`,
+  Messung und Messfenster gegen einen echten `php -S`, den Durchstich
+  gegen die Attrappe samt Client in JavaScript, dazu den Android-Kern.
+  Dauer gut eine Minute.
+
+  Hochladen ging erst, nachdem Manuel dem GitHub-Token die Berechtigung
+  `workflow` erteilt hatte -- die verlangt eine Bestaetigung im Browser
+  und laesst sich nicht von hier aus geben.
+
+  **Sechs Laeufe, vier Funde**, von denen keiner von Hand aufgefallen
+  waere: `cryptography` fehlte in der Ablaufumgebung; die Messpruefung
+  hing an der Rechnergeschwindigkeit und wackelte auf beiden Seiten (sie
+  pruefte `anteil_hinauf`, waehrend der Code aus `max(hinauf, herunter)`
+  entscheidet, und leitete die Schwelle aus einer ERSTEN Messung ab, um
+  sie gegen eine ZWEITE zu pruefen); und die benutzten Aktionen zielten
+  auf eine abgekuendigte Node-Fassung.
+
+  Nicht in der CI, mit Absicht: `tests/durchstich.sh` und
+  `tests/pruefe_portal_live.cjs`. Beide brauchen einen echten Webspace und
+  einen laufenden Agenten, also Zugangsdaten -- und ein Geheimnis in einem
+  CI-Lauf ist ein Geheimnis, das aus dem Haus ist.
