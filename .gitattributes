@@ -1,0 +1,51 @@
+# Zeilenenden gehoeren ins Repository, nicht in die Einstellung dessen,
+# der es klont.
+#
+# WARUM DIESE DATEI DA SEIN MUSS
+# -------------------------------
+# Git fuer Windows setzt `core.autocrlf=true` in der Voreinstellung. Ohne
+# Vorgabe hier bekommt also JEDER Windows-Nutzer beim Klonen saemtliche
+# Textdateien in CRLF -- auch `ausliefern.sh`, `relay.php`, `durchstich.sh`
+# und die `.htaccess`-Vorlagen.
+#
+# Alles davon landet am Ende auf Linux: der Vermittler auf einem Webspace,
+# der Agent auf einem Heimserver. Dort ist CRLF nicht unschoen, sondern
+# kaputt. Ein Shellskript mit `\r` hinter der Shebang-Zeile bricht mit
+# "bad interpreter" ab, und ein regulaerer Ausdruck, der auf `\n` endet,
+# trifft `\r\n` nicht.
+#
+# Genau das ist am 02.09.2026 schon einmal passiert: relay.php wurde beim
+# Bearbeiten auf einem Windows-Rechner still zu CRLF, und
+# tests/pruefe_absender.php fand die Funktion nicht mehr, die es zu pruefen
+# galt. Aufgefallen ist es erst auf dem Server. Damals war es ein Editor;
+# ohne diese Datei waere es fuer jeden fremden Windows-Nutzer schon das
+# Klonen.
+#
+# `eol=lf` erzwingt LF auch in der Arbeitskopie -- unabhaengig davon, was
+# der Klonende eingestellt hat. Das ist der Punkt: Die Vorgabe des
+# Projekts schlaegt die Vorgabe des Rechners.
+
+* text=auto eol=lf
+
+# Die eine Ausnahme, und sie ist keine Nachlaessigkeit: Eine Windows-
+# Stapeldatei MUSS CRLF haben. Der Befehlsinterpreter von Windows liest
+# `goto`-Marken und mehrzeilige Bloecke sonst falsch.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Nicht anfassen. Der Gradle-Starter ist ein Java-Archiv; jede
+# Zeilenenden-Wandlung darin macht ihn unbrauchbar.
+*.jar  binary
+
+# Vorsorglich, damit ein spaeter hinzugefuegtes Bild nicht still zerstoert
+# wird -- der Fehler faellt sonst erst auf, wenn jemand die Datei oeffnet.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.apk  binary
+*.keystore binary
+*.jks  binary
