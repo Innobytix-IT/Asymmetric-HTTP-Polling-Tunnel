@@ -205,7 +205,22 @@ def main():
                    for x in e_eng['saetze']),
                'und der Satz sagt: nicht der Vermittler')
 
-        einrichten.leitung_schreiben(rate * 20, 1000)              # weit drueber
+        # WEIT DRUEBER, und zwar fuer BEIDE Richtungen.
+        #
+        # Der Satz unten entsteht aus `max(anteil_hinauf, anteil_herunter)`
+        # -- die Richtung, die die Leitung am staerksten ausschoepft, ist
+        # die interessante. Die Leitung nur am Ablegen zu bemessen genuegt
+        # deshalb nicht: Auf einem schnellen Rechner holt AHPT deutlich
+        # zuegiger zurueck als es ablegt, und dann landet der Anteil der
+        # Gegenrichtung zwischen den beiden Schwellen (0,25 und 0,6). Es
+        # entsteht ueberhaupt kein Satz, und die Pruefung faellt um, ohne
+        # dass irgendetwas kaputt waere.
+        #
+        # Am 10.09.2026 im ersten CI-Lauf genau so passiert: 304 Mbit/s
+        # ueber die Rueckschleife des Laeufers, waehrend derselbe Test auf
+        # dem Heimserver durchlief.
+        schnellste = max(e.get('ablegen_bps') or 0, e.get('abholen_bps') or 0)
+        einrichten.leitung_schreiben(round(schnellste * 8 / 1e6 * 20, 2), 1000)
         e_weit = einrichten.vermittler_messen(basis, groesse=256 * 1024)
         pruefe((e_weit.get('anteil_hinauf') or 1) < 0.25,
                'weite Leitung -> niedriger Anteil (%.0f %%)'
