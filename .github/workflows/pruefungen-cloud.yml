@@ -1,0 +1,117 @@
+# Pruefungen fuer cloud/ -- bei jedem Push und jedem Pull Request.
+#
+# WOZU
+# ----
+# Am 10.09.2026 hat ein Versuch, das Projekt einmal als Fremder zu benutzen,
+# drei rote Pruefungen zutage gefoerdert: der Agent stuerzte bei fehlendem
+# [krypto]-Abschnitt mit einem AttributeError ab, die Schlangen-Pruefung mass
+# die Vorbereitung mit, und die Zeilenenden-Pruefung meldete Windows-Dateien
+# als Fehler. Alle drei waren seit Wochen rot -- nur hat sie niemand laufen
+# lassen.
+#
+# Genau das ist der Zweck dieser Datei. Pruefungen, die von Hand angestossen
+# werden muessen, werden irgendwann nicht mehr angestossen. Bei einem
+# Projekt, dessen Kernaussage Sicherheit ist, ist das die teuerste Luecke.
+#
+# WAS HIER NICHT LAEUFT
+# ---------------------
+# `tests/durchstich.sh` und `tests/pruefe_portal_live.cjs` brauchen einen
+# ECHTEN Webspace mit PHP und einen laufenden Agenten. Beides gehoert nicht
+# in eine oeffentliche Ablaufumgebung -- es braeuchte Zugangsdaten, und ein
+# Geheimnis in einem CI-Lauf ist ein Geheimnis, das aus dem Haus ist.
+# Der Durchstich gegen einen echten Vermittler bleibt Handarbeit, und die
+# Datei sagt das an ihrer eigenen Stelle auch.
+
+name: Pruefungen cloud
+
+on:
+  push:
+    paths:
+      - 'cloud/**'
+      - '.github/workflows/pruefungen-cloud.yml'
+  pull_request:
+    paths:
+      - 'cloud/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+
+  python-und-php:
+    name: Python, PHP, Node
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: cloud
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # php-cli wird von pruefe_relay_php.py, pruefe_messung.py und
+      # pruefe_messfenster.py gebraucht: Sie stellen einen echten
+      # `php -S` als Wegwerf-Vermittler auf. Ohne php ueberspringen sich
+      # diese Pruefungen mit Code 77 -- hier soll aber nichts uebersprungen
+      # werden, deshalb ausdruecklich installiert.
+      - name: php-cli einrichten
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq php-cli
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Noise IK gegen die offiziellen Testvektoren
+        run: python3 tests/pruefe_krypto.py
+
+      - name: Noise IK in JavaScript
+        run: node tests/pruefe_noise_js.cjs
+
+      - name: Grosse Dateien, blockweise
+        run: python3 tests/pruefe_bloecke.py
+
+      - name: Listen-Zaehler
+        run: python3 tests/pruefe_liste.py
+
+      - name: relay.php statisch
+        run: python3 tests/pruefe_relay_php.py
+
+      - name: Vermittler-Messung
+        run: python3 tests/pruefe_messung.py
+
+      - name: Messfenster
+        run: python3 tests/pruefe_messfenster.py
+
+      # Zuletzt, weil er am laengsten braucht und am meisten prueft:
+      # Besucher -> Vermittler-Attrappe -> Agent -> Handler -> zurueck,
+      # samt dem Client in JavaScript.
+      - name: Durchstich gegen die Attrappe
+        run: python3 tests/durchstich_lokal.py
+
+  android-kern:
+    name: Android-Kern
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: cloud/android
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 17, wie in build.gradle.kts festgelegt.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # NUR :kern:test. Das Modul ist reines Kotlin ohne Android -- genau
+      # dafuer ist es getrennt. Ein APK zu bauen braeuchte das SDK und
+      # pruefte nichts, was diese Pruefungen nicht schon pruefen.
+      - name: Kern-Pruefungen
+        run: ./gradlew --no-daemon :kern:test
