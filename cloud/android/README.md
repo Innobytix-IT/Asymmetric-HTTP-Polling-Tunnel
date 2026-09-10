@@ -81,6 +81,43 @@ nennt.
     ./gradlew :kern:test           # Pruefungen, ohne Geraet
     ./gradlew :app:assembleDebug   # APK nach app/build/outputs/apk/debug/
 
+### Eine Fassung, die man weitergeben kann
+
+Der Debug-Bau oben ist zum Entwickeln da, nicht zum Verteilen: Er ist als
+`debuggable` markiert und traegt einen Schluessel, den sich jeder Rechner
+selbst erzeugt. Auf einem fremden Geraet hat er nichts verloren.
+
+Fuer eine weitergebbare Fassung braucht es einen eigenen
+Schluesselspeicher. **Den legst du an, nicht das Projekt** — er und sein
+Passwort bleiben bei dir und stehen in `.gitignore`:
+
+```bash
+keytool -genkeypair -v -keystore ahpt.jks -alias ahpt -keyalg RSA -keysize 4096 -validity 10000
+```
+
+`keytool` fragt dann nach einem Passwort und ein paar Angaben zur Person.
+Danach eine Datei `android/keystore.properties` anlegen:
+
+    speicher=/pfad/zu/ahpt.jks
+    speicherPasswort=<dein Passwort>
+    schluessel=ahpt
+    schluesselPasswort=<dein Passwort>
+
+Und dann:
+
+    ./gradlew :app:assembleRelease   # nach app/build/outputs/apk/release/
+
+**Diesen Schluesselspeicher nie verlieren.** Android laesst eine
+Aktualisierung nur zu, wenn sie mit demselben Schluessel signiert ist wie
+die installierte Fassung. Ist er weg, koennen deine Nutzer nicht mehr
+aktualisieren, sondern muessten deinstallieren und neu einrichten — mit
+neuem Geraeteschluessel.
+
+Fehlt `keystore.properties`, laeuft alles wie bisher; `assembleRelease`
+liefert dann ein **unsigniertes** APK, das Android nicht installiert. Das
+ist Absicht: Wer nur die Pruefungen laufen lassen will, soll sich keinen
+Schluesselspeicher anlegen muessen.
+
 ## Einrichten
 
 Beim ersten Start fragt die App nach:

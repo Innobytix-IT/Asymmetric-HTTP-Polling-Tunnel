@@ -4,3 +4,8 @@ local.properties
 build/
 *.iml
 .idea/
+
+# Schluesselspeicher und sein Passwort bleiben beim Betreiber.
+keystore.properties
+*.jks
+*.keystore

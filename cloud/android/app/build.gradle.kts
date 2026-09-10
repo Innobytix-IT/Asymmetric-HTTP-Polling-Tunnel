@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  * Copyright (C) 2026 Manuel Person, InnoBytix-IT
  */
+// `java.util.Properties` laesst sich in einem Gradle-Skript nicht
+// ausschreiben: `java` ist dort die Java-Erweiterung des Projekts und
+// verdeckt das gleichnamige Paket. Deshalb hier der Import.
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     kotlin("android")
@@ -30,9 +35,56 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Signierung fuer eine Fassung, die man weitergeben kann.
+    //
+    // Android installiert kein unsigniertes APK. Ohne das hier gibt es das
+    // Programm nur als Debug-Bau -- und der traegt einen Schluessel, den
+    // sich jeder Rechner selbst erzeugt, ist als `debuggable` markiert und
+    // hat auf einem fremden Geraet nichts verloren.
+    //
+    // DER SCHLUESSELSPEICHER GEHOERT NICHT INS REPOSITORIUM, und sein
+    // Passwort erst recht nicht. Beides bleibt beim Betreiber. Diese Datei
+    // liest nur, was daneben liegt:
+    //
+    //     android/keystore.properties      (steht in .gitignore)
+    //         speicher=/pfad/zu/ahpt.jks
+    //         speicherPasswort=...
+    //         schluessel=ahpt
+    //         schluesselPasswort=...
+    //
+    // Anlegen mit `keytool` -- siehe android/README.md. Fehlt die Datei,
+    // laeuft alles weiter wie bisher; `assembleRelease` liefert dann eben
+    // ein unsigniertes APK. Das ist Absicht: Wer nur die Pruefungen laufen
+    // lassen oder einen Debug-Bau machen will, soll sich keinen
+    // Schluesselspeicher anlegen muessen.
+    val schluesselDatei = rootProject.file("keystore.properties")
+    val schluesselAngaben = Properties().apply {
+        if (schluesselDatei.exists()) schluesselDatei.inputStream().use { load(it) }
+    }
+
+    signingConfigs {
+        if (schluesselDatei.exists()) {
+            create("freigabe") {
+                storeFile = file(schluesselAngaben.getProperty("speicher"))
+                storePassword = schluesselAngaben.getProperty("speicherPasswort")
+                keyAlias = schluesselAngaben.getProperty("schluessel")
+                keyPassword = schluesselAngaben.getProperty("schluesselPasswort")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // NICHT eingeschaltet, und das ist eine Entscheidung: R8 wirft
+            // weg, was es fuer unerreichbar haelt. Dieses Programm spricht
+            // ueber org.json und Reflexion mit sich selbst; ein zu
+            // eifriges Wegwerfen faellt erst im Betrieb auf, und dann auf
+            // einem fremden Geraet. Erst einschalten, wenn es Regeln dafuer
+            // gibt und jemand sie geprueft hat.
             isMinifyEnabled = false
+            if (schluesselDatei.exists()) {
+                signingConfig = signingConfigs.getByName("freigabe")
+            }
         }
     }
 
