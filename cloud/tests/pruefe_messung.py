@@ -195,41 +195,47 @@ def main():
         # Befunde. Genau das ist der Zweck: Ein Vermittler, der die Leitung
         # ausschoepft, ist nicht lahm, sondern fertig.
         einrichten.LEITUNG_DATEI = os.path.join(heim, 'leitung.json')
-        rate = (e.get('ablegen_bps') or 0) * 8 / 1e6
-        einrichten.leitung_schreiben(round(rate * 1.1, 2), 1000)   # knapp drueber
+
+        # JEDE RICHTUNG AN IHRER EIGENEN RATE bemessen, und auf `anteil`
+        # pruefen statt auf `anteil_hinauf`.
+        #
+        # Diese beiden Pruefungen haben am 10.09.2026 in der CI zweimal
+        # gewackelt, jedes Mal auf der anderen Seite -- und beide Male ohne
+        # dass etwas kaputt gewesen waere. Zwei Gruende steckten dahinter:
+        #
+        #   * Das Urteil entsteht aus `max(anteil_hinauf, anteil_herunter)`.
+        #     Wer nur eine Richtung prueft, prueft eine Zahl, die der Code
+        #     gar nicht benutzt -- und bekommt Widersprueche wie "Anteil
+        #     56 %" neben "der Satz sagt: nicht der Vermittler".
+        #   * Die kuenstliche Leitung wurde aus der ERSTEN Messung
+        #     abgeleitet und gegen eine ZWEITE geprueft. Auf einem
+        #     geteilten Laeufer schwankt der Durchsatz zwischen zwei
+        #     Messungen erheblich; einmal war die zweite um 38 % langsamer,
+        #     und schon lag der Anteil unter der Schwelle.
+        #
+        # Beides zusammen: Beide Richtungen bekommen ihre eigene Grenze,
+        # und geprueft wird die groessere der beiden Ausschoepfungen. Damit
+        # muessten BEIDE Richtungen gleichzeitig stark einbrechen, damit
+        # die Pruefung faellt.
+        auf = (e.get('ablegen_bps') or 0) * 8 / 1e6
+        ab = (e.get('abholen_bps') or 0) * 8 / 1e6
+
+        # Knapp: die Leitung gibt genau das her, was gemessen wurde.
+        einrichten.leitung_schreiben(round(auf, 2), round(ab, 2))
         e_eng = einrichten.vermittler_messen(basis, groesse=256 * 1024)
-        pruefe(e_eng.get('anteil_hinauf', 0) and e_eng['anteil_hinauf'] > 0.6,
+        pruefe((e_eng.get('anteil') or 0) > 0.6,
                'knappe Leitung -> hoher Anteil (%.0f %%)'
-               % ((e_eng.get('anteil_hinauf') or 0) * 100))
+               % ((e_eng.get('anteil') or 0) * 100))
         pruefe(any('Am Vermittler liegt es jedenfalls nicht' in x
                    for x in e_eng['saetze']),
                'und der Satz sagt: nicht der Vermittler')
 
-        # WEIT DRUEBER, und zwar fuer BEIDE Richtungen.
-        #
-        # Der Satz unten entsteht aus `max(anteil_hinauf, anteil_herunter)`
-        # -- die Richtung, die die Leitung am staerksten ausschoepft, ist
-        # die interessante. Die Leitung nur am Ablegen zu bemessen genuegt
-        # deshalb nicht: Auf einem schnellen Rechner holt AHPT deutlich
-        # zuegiger zurueck als es ablegt, und dann landet der Anteil der
-        # Gegenrichtung zwischen den beiden Schwellen (0,25 und 0,6). Es
-        # entsteht ueberhaupt kein Satz, und die Pruefung faellt um, ohne
-        # dass irgendetwas kaputt waere.
-        #
-        # Am 10.09.2026 im ersten CI-Lauf genau so passiert: 304 Mbit/s
-        # ueber die Rueckschleife des Laeufers, waehrend derselbe Test auf
-        # dem Heimserver durchlief.
-        # Und BEIDE Werte weiten, nicht nur den fuer das Ablegen. Der
-        # zweite Parameter ist die Herunter-Leitung; blieb er bei 1000
-        # Mbit/s, kam der zweite CI-Lauf auf 275 Mbit/s Durchsatz -- also
-        # 27 %, und damit wieder in die Luecke zwischen den Schwellen.
-        schnellste = max(e.get('ablegen_bps') or 0, e.get('abholen_bps') or 0)
-        weit = round(schnellste * 8 / 1e6 * 20, 2)
-        einrichten.leitung_schreiben(weit, weit)
+        # Weit: zwanzigfach darueber, in beide Richtungen.
+        einrichten.leitung_schreiben(round(auf * 20, 2), round(ab * 20, 2))
         e_weit = einrichten.vermittler_messen(basis, groesse=256 * 1024)
-        pruefe((e_weit.get('anteil_hinauf') or 1) < 0.25,
+        pruefe((e_weit.get('anteil') or 1) < 0.25,
                'weite Leitung -> niedriger Anteil (%.0f %%)'
-               % ((e_weit.get('anteil_hinauf') or 0) * 100))
+               % ((e_weit.get('anteil') or 0) * 100))
         pruefe(any('NICHT dein' in x for x in e_weit['saetze']),
                'und der Satz sagt: nicht dein Anschluss')
         einrichten.leitung_schreiben(None, None)
