@@ -120,24 +120,37 @@ def autostart_setzen(an, konfig):
 
     os.makedirs(os.path.dirname(pfad), exist_ok=True)
     agent = os.path.join(HIER, 'relay_agent.py')
+    eingefroren = getattr(sys, 'frozen', False)
     if sys.platform.startswith('win'):
-        # pythonw statt python: sonst blitzt bei jeder Anmeldung ein
-        # schwarzes Konsolenfenster auf und bleibt stehen.
-        pyw = sys.executable.replace('python.exe', 'pythonw.exe')
         with open(pfad, 'w', encoding='utf-8') as f:
             f.write('@echo off\r\n')
-            f.write('start "" "%s" "%s" --konfig "%s"\r\n'
-                    % (pyw, agent, konfig))
+            if eingefroren:
+                # Als .exe gibt es kein Skript daneben; der Einstieg waehlt
+                # ueber --rolle den Agenten. Ein _MEIPASS-Pfad taugt hier
+                # nicht -- er zeigt nach dem naechsten Start ins Leere. Die
+                # .exe ist fensterlos, also blitzt auch kein Fenster auf.
+                f.write('start "" "%s" --rolle agent --konfig "%s"\r\n'
+                        % (sys.executable, konfig))
+            else:
+                # pythonw statt python: sonst blitzt bei jeder Anmeldung ein
+                # schwarzes Konsolenfenster auf und bleibt stehen.
+                pyw = sys.executable.replace('python.exe', 'pythonw.exe')
+                f.write('start "" "%s" "%s" --konfig "%s"\r\n'
+                        % (pyw, agent, konfig))
     else:
+        if eingefroren:
+            exec_zeile = '"%s" --rolle agent --konfig "%s"' % (sys.executable, konfig)
+        else:
+            exec_zeile = '%s %s --konfig %s' % (sys.executable, agent, konfig)
         with open(pfad, 'w', encoding='utf-8') as f:
             f.write('[Desktop Entry]\n'
                     'Type=Application\n'
                     'Name=AHPT Cloud\n'
                     'Comment=Startet den AHPT-Agenten beim Anmelden\n'
-                    'Exec=%s %s --konfig %s\n'
+                    'Exec=%s\n'
                     'Terminal=false\n'
                     'X-GNOME-Autostart-enabled=true\n'
-                    % (sys.executable, agent, konfig))
+                    % exec_zeile)
 
 
 def main():
