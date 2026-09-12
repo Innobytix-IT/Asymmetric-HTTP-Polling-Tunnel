@@ -63,6 +63,10 @@ Kopie, die sich unabhängig weiterentwickeln darf.
 ## Lizenz
 
 [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later).
+Sie gilt für **jeden Teil dieses Projekts** — Vermittler, Agent,
+Client und die Android-App gleichermaßen, nicht nur für die
+Server-Seite. Der Client und die App stehen ausdrücklich unter
+denselben Bedingungen, nicht unter einer freizügigeren Lizenz.
 Wer eine geänderte Fassung über ein Netzwerk anbietet, muss den
 Quelltext auch dieser geänderten Fassung offenlegen — das gilt gerade für
 einen Vermittlungsdienst wie diesen ausdrücklich.
