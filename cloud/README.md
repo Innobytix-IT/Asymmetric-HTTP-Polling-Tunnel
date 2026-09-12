@@ -53,6 +53,12 @@ Auf einem Heimserver ohne Bildschirm gibt es kein Fenster. Dann sagt
 `starten.py` das und nennt die Befehle -- der Weg ueber die Konsole
 funktioniert unveraendert.
 
+**Die App fuers Handy** liegt fertig gebaut und signiert bei den Releases:
+[ahpt-cloud-1.0.apk](https://github.com/Innobytix-IT/Asymmetric-HTTP-Polling-Tunnel/releases/download/v1.0.0/ahpt-cloud-1.0.apk).
+Der Assistent zeigt beim Koppeln denselben Link auch als QR-Code zum
+Abfotografieren mit dem Handy. Wer lieber selbst baut: siehe
+`android/README.md`.
+
 ### Der von Hand
 
 Alles, was der Assistent tut, laesst sich auch einzeln machen. Wer wissen
