@@ -1383,7 +1383,10 @@ def _agent_stoppen(pid_datei):
         with open(pid_datei) as f:
             pid = int(f.read().strip())
         os.kill(pid, 15)
-    except (OSError, ValueError):
+    except (OSError, ValueError, SystemError):
+        # SystemError: os.kill wirft im fensterlosen Windows-Bau (der .exe)
+        # fuer einen bereits toten Prozess keinen OSError, sondern einen
+        # SystemError. Ein schon beendeter Agent ist kein Fehler.
         pass
 
 
@@ -1894,17 +1897,47 @@ def _konfig_bauen(webspace, geheimnis_datei, agent_key, freigabe):
     ) % (q(webspace), q(geheimnis_datei), q(agent_key), q(freigabe))
 
 
+def _pid_lebt(pid):
+    """Laeuft der Prozess mit dieser Nummer noch? Plattformuebergreifend.
+
+    Unter Windows ist `os.kill(pid, 0)` KEIN Existenztest: os.kill ruft dort
+    TerminateProcess, und im fensterlosen Bau (der .exe) wirft es fuer einen
+    toten Prozess ausserdem einen SystemError statt OSError -- was sonst als
+    "unerwartet: SystemError" durchschlaegt. Deshalb unter Windows ueber die
+    Win32-API pruefen: nur ABFRAGEN, nichts beenden.
+    """
+    if pid <= 0:
+        return False
+    if sys.platform.startswith('win'):
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not h:
+            return False
+        try:
+            code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(h, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)  # Signal 0: nur pruefen, ob die PID existiert
+        return True
+    except OSError:
+        return False
+
+
 def _agent_laeuft(pid_datei):
     try:
         with open(pid_datei) as f:
             pid = int(f.read().strip())
     except (OSError, ValueError):
         return False
-    try:
-        os.kill(pid, 0)  # signal 0: nur pruefen, ob PID existiert
-        return True
-    except OSError:
-        return False
+    return _pid_lebt(pid)
 
 
 def _log_ende(log_datei, zeilen):
