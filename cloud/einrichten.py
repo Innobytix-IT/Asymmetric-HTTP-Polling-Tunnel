@@ -68,6 +68,14 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 KONFIG_ORDNER = os.path.expanduser('~/.ahpt')
 STANDDATEI = os.path.join(KONFIG_ORDNER, 'einrichten_stand.json')
 
+# Die fertige, signierte App zum Herunterladen. Die Version steckt im Pfad
+# UND im Dateinamen -- bei einer neuen Ausgabe hier nachziehen, ebenso den
+# sichtbaren Link auf der Kopplungsseite und den im README. Nichts Geheimes:
+# nur die oeffentliche GitHub-Release-Adresse; der QR unter /apk.svg zeigt
+# hierher.
+APK_URL = ('https://github.com/Innobytix-IT/Asymmetric-HTTP-Polling-Tunnel'
+           '/releases/download/v1.0.0/ahpt-cloud-1.0.apk')
+
 # ---------------------------------------------------------------- Zustand
 #
 # Ein einziger Zustand fuer den ganzen Assistenten, geschuetzt durch ein
@@ -1986,7 +1994,7 @@ class Auslieferer(BaseHTTPRequestHandler):
         # Programm direkt abruft -- die App beim Koppeln, ein Download --
         # soll unmittelbar antworten statt eine Umleitung zu schicken, der
         # es folgen muesste, um sich einen Cookie zu holen.
-        _direkt = pfad.startswith('/api/') or pfad in ('/kopplung.svg',
+        _direkt = pfad.startswith('/api/') or pfad in ('/kopplung.svg', '/apk.svg',
                                                        '/vermittler.zip')
         if 't' in q and not _direkt:
             t = q['t'][0]
@@ -2022,6 +2030,17 @@ class Auslieferer(BaseHTTPRequestHandler):
                                      qr.svg(daten, 'M', punkt=6))
             except EinrichtenFehler as e:
                 return self._antwort(400, 'text/plain; charset=utf-8', str(e))
+            except Exception as e:
+                return self._antwort(500, 'text/plain; charset=utf-8',
+                                     'QR-Code fehlgeschlagen: %s' % e)
+        if pfad == '/apk.svg':
+            # Zeigt auf die fertige App (GitHub-Release). Steht in _direkt,
+            # antwortet also ohne Token: Der Code enthaelt nur APK_URL, kein
+            # Geheimnis.
+            try:
+                import qr
+                return self._antwort(200, 'image/svg+xml; charset=utf-8',
+                                     qr.svg(APK_URL, 'M', punkt=6))
             except Exception as e:
                 return self._antwort(500, 'text/plain; charset=utf-8',
                                      'QR-Code fehlgeschlagen: %s' % e)
@@ -2919,6 +2938,18 @@ function zeigeGeraetHinzufuegen() {
     + 'von beiden muss der eigene &ouml;ffentliche Schl&uuml;ssel hierher '
     + 'zur&uuml;ck. Nur der WEG dorthin unterscheidet sich.</p>'
 
+    + '<h3>App noch nicht auf dem Handy?</h3>'
+    + '<p>Die fertige, signierte App. Am schnellsten mit der '
+    + '<b>Kamera des Handys</b> diesen Code abfotografieren &ndash; er '
+    + 'f&uuml;hrt direkt zum Download:</p>'
+    + '<div style="text-align:center;margin:14px 0">'
+    + '<img src="/apk.svg" alt="Download-Code der App" '
+    + 'style="width:220px;height:220px;image-rendering:pixelated;'
+    + 'background:#fff;padding:8px;border-radius:4px"></div>'
+    + '<p style="text-align:center;font-size:13px">oder von Hand: '
+    + '<a href="https://github.com/Innobytix-IT/Asymmetric-HTTP-Polling-Tunnel'
+    + '/releases/download/v1.0.0/ahpt-cloud-1.0.apk" target="_blank" '
+    + 'rel="noopener">ahpt-cloud-1.0.apk</a></p>'
     + '<h3>Die App: abfotografieren</h3>'
     + '<p>In der AHPT-App auf &bdquo;Code abfotografieren&ldquo; tippen. Die '
     + 'App richtet sich selbst ein und meldet sich hier zur&uuml;ck &ndash; '
