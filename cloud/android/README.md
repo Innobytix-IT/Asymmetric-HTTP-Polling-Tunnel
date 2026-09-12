@@ -4,6 +4,17 @@ Dasselbe wie `../portal/`, nur als App. Das Portal bleibt unveraendert — wer
 lieber die HTML-Datei auf dem Handy oeffnet, kann das weiter tun. Diese App
 ist ein zweiter Weg, kein Ersatz.
 
+## Fertig herunterladen
+
+Wer die App nur benutzen will, muss sie nicht bauen: Die fertige, signierte
+Fassung liegt bei den
+[Releases](https://github.com/Innobytix-IT/Asymmetric-HTTP-Polling-Tunnel/releases/download/v1.0.0/ahpt-cloud-1.0.apk)
+(`ahpt-cloud-1.0.apk`). Der Einrichtungs-Assistent zeigt beim Koppeln
+denselben Link auch als QR-Code. Selbst bauen lohnt nur, wer etwas aendern
+will — und Achtung: Ein ohne Schluesselspeicher gebautes APK ist
+**unsigniert und laesst sich auf Android nicht installieren** (siehe
+„Bauen“).
+
 ## Warum ueberhaupt, wenn es das Portal schon gibt
 
 Eine App, die nur das Portal in einen Rahmen packt (WebView), loeste zwar
