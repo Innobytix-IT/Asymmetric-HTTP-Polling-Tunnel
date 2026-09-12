@@ -63,10 +63,17 @@ Kopie, die sich unabhängig weiterentwickeln darf.
 ## Lizenz
 
 [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later).
-Sie gilt für **jeden Teil dieses Projekts** — Vermittler, Agent,
-Client und die Android-App gleichermaßen, nicht nur für die
-Server-Seite. Der Client und die App stehen ausdrücklich unter
-denselben Bedingungen, nicht unter einer freizügigeren Lizenz.
+Sie gilt für **jeden Teil dieses Projekts** und für **jede der drei
+Seiten** gleichermaßen:
+
+- den **Server** (Agent/Heimserver),
+- den **Client** (Kommandozeile, Portal und die Android-App) und
+- den **Übertragungsweg als solchen** — den Vermittler (`relay.php`)
+  samt dem gesamten Transportcode (Rahmung, Polling,
+  Noise-Verschlüsselung).
+
+Keine dieser Seiten steht unter einer freizügigeren Lizenz; App und
+Client sind ausdrücklich eingeschlossen, der Übertragungsweg ebenso.
 Wer eine geänderte Fassung über ein Netzwerk anbietet, muss den
 Quelltext auch dieser geänderten Fassung offenlegen — das gilt gerade für
 einen Vermittlungsdienst wie diesen ausdrücklich.
